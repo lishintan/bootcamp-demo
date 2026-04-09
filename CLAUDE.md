@@ -79,6 +79,10 @@ Note: `settings.local.json` is gitignored and stays local to each user's machine
 
 The build pipeline includes an optional independent review step using OpenAI's Codex CLI. If `codex` is not installed, the step is skipped automatically.
 
-To install: `npm i -g @openai/codex`
+To install: `npm i -g @openai/codex` then `codex login` to authenticate.
 
 To use standalone: `/codex-review` reviews all uncommitted changes.
+
+## Prerequisites
+
+See the [README](README.md) for detailed installation instructions for Git, Node.js, Claude Code, and (optionally) Codex CLI.
