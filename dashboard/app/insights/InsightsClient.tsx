@@ -1215,8 +1215,8 @@ export default function InsightsClient() {
           }),
         })
         if (!resp.ok) {
-          const errData = await resp.json().catch(() => ({})) as { error?: string }
-          throw new Error(`[${resp.status}] ${errData.error ?? 'Failed to create bookmark'}`)
+          const errData = await resp.json().catch(() => ({})) as { error?: string; detail?: string }
+          throw new Error(`[${resp.status}] ${errData.detail ?? errData.error ?? 'Failed to create bookmark'}`)
         }
         setBookmarkedIds(prev => new Set(prev).add(group.id))
       }

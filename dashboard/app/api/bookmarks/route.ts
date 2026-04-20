@@ -128,7 +128,8 @@ export async function POST(req: NextRequest) {
 
     return Response.json({ bookmark: newBookmark }, { status: 201 })
   } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
     console.error('[POST /api/bookmarks]', error)
-    return Response.json({ error: 'Failed to save bookmark' }, { status: 500 })
+    return Response.json({ error: 'Failed to save bookmark', detail }, { status: 500 })
   }
 }
