@@ -145,13 +145,14 @@ async function readRedisCache(): Promise<{ tickets: JiraTicket[]; total: number 
 async function writeRedisCache(data: { tickets: JiraTicket[]; total: number }): Promise<void> {
   if (!REDIS_URL || !REDIS_TOKEN) return
   try {
-    await fetch(`${REDIS_URL}/set/${REDIS_CACHE_KEY}/ex/${CACHE_TTL_SECONDS}`, {
+    // Use pipeline to SET with EX in one request
+    await fetch(`${REDIS_URL}/pipeline`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${REDIS_TOKEN}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(JSON.stringify(data)),
+      body: JSON.stringify([['SET', REDIS_CACHE_KEY, JSON.stringify(data), 'EX', CACHE_TTL_SECONDS]]),
     })
   } catch {
     // non-fatal
