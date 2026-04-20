@@ -1,5 +1,4 @@
 import Link from 'next/link'
-import HomeStats from '@/components/HomeStats'
 
 export default function HomePage() {
   return (
@@ -32,7 +31,7 @@ export default function HomePage() {
               Browse semantically clustered product feedback — bugs and feature requests grouped by theme, ranked by temperature.
             </p>
 
-            <HomeStats />
+            <p className="text-xs text-indigo-400">Jira · Parking Lot &amp; Won&apos;t Do tickets</p>
           </div>
         </Link>
 
