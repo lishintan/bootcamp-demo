@@ -118,12 +118,53 @@ function mapIssue(issue: JiraIssueRaw): JiraTicket {
   }
 }
 
-let _cache: { tickets: JiraTicket[]; total: number } | null = null
-let _cacheExpiry = 0
-const CACHE_TTL_MS = 60 * 60 * 1000 // 1 hour
+const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL
+const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
+const REDIS_CACHE_KEY = 'pid-jira-tickets'
+const CACHE_TTL_SECONDS = 60 * 60 // 1 hour
+
+// In-memory fallback for when Redis is unavailable
+let _memCache: { tickets: JiraTicket[]; total: number } | null = null
+let _memCacheExpiry = 0
+
+async function readRedisCache(): Promise<{ tickets: JiraTicket[]; total: number } | null> {
+  if (!REDIS_URL || !REDIS_TOKEN) return null
+  try {
+    const res = await fetch(`${REDIS_URL}/get/${REDIS_CACHE_KEY}`, {
+      headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
+      cache: 'no-store',
+    })
+    const json = await res.json() as { result: string | null }
+    if (!json.result) return null
+    return JSON.parse(json.result) as { tickets: JiraTicket[]; total: number }
+  } catch {
+    return null
+  }
+}
+
+async function writeRedisCache(data: { tickets: JiraTicket[]; total: number }): Promise<void> {
+  if (!REDIS_URL || !REDIS_TOKEN) return
+  try {
+    await fetch(`${REDIS_URL}/set/${REDIS_CACHE_KEY}/ex/${CACHE_TTL_SECONDS}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${REDIS_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(JSON.stringify(data)),
+    })
+  } catch {
+    // non-fatal
+  }
+}
 
 export async function fetchJiraTickets(): Promise<{ tickets: JiraTicket[]; total: number }> {
-  if (_cache && Date.now() < _cacheExpiry) return _cache
+  // 1. Try Redis (survives cold starts, shared across instances)
+  const redisHit = await readRedisCache()
+  if (redisHit) return redisHit
+
+  // 2. Try in-memory (within same warm instance)
+  if (_memCache && Date.now() < _memCacheExpiry) return _memCache
 
   const baseUrl = process.env.JIRA_BASE_URL!
   const auth = getJiraAuth()
@@ -168,9 +209,14 @@ export async function fetchJiraTickets(): Promise<{ tickets: JiraTicket[]; total
     isLast = data.isLast ?? true // fallback to true if missing
   } while (!isLast && nextPageToken)
 
-  _cache = { tickets: allTickets, total: allTickets.length }
-  _cacheExpiry = Date.now() + CACHE_TTL_MS
-  return _cache
+  const result = { tickets: allTickets, total: allTickets.length }
+
+  // Persist to Redis (1-hour TTL) and warm in-memory fallback
+  await writeRedisCache(result)
+  _memCache = result
+  _memCacheExpiry = Date.now() + CACHE_TTL_SECONDS * 1000
+
+  return result
 }
 
 // Pick the single most comprehensive/clear quote from ticket descriptions
