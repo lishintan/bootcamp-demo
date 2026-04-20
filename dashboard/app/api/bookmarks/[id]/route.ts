@@ -37,13 +37,13 @@ async function readBookmarks(): Promise<Bookmark[]> {
 async function writeBookmarks(bookmarks: Bookmark[]): Promise<void> {
   if (REDIS_URL && REDIS_TOKEN) {
     try {
-      await fetch(`${REDIS_URL}/set/${REDIS_KEY}`, {
+      await fetch(`${REDIS_URL}/pipeline`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${REDIS_TOKEN}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(JSON.stringify(bookmarks)),
+        body: JSON.stringify([['SET', REDIS_KEY, JSON.stringify(bookmarks)]]),
       })
     } catch {
       // non-fatal

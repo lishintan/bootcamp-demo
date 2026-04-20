@@ -711,8 +711,10 @@ function CategorySection({
 
 function BookmarkedInsightsSection({
   selectedTeams,
+  refreshKey,
 }: {
   selectedTeams: string[]
+  refreshKey: number
 }) {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [loading, setLoading] = useState(true)
@@ -749,7 +751,7 @@ function BookmarkedInsightsSection({
 
   useEffect(() => {
     fetchBookmarks()
-  }, [fetchBookmarks])
+  }, [fetchBookmarks, refreshKey])
 
   async function handleArchive(bookmark: Bookmark) {
     setArchivingId(bookmark.id)
@@ -1123,6 +1125,7 @@ export default function InsightsClient() {
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set())
   const [bookmarkError, setBookmarkError] = useState<string | null>(null)
   const [pendingBookmark, setPendingBookmark] = useState<InsightGroup | null>(null)
+  const [bookmarkRefreshKey, setBookmarkRefreshKey] = useState(0)
 
   // Load current user from localStorage on mount
   useEffect(() => {
@@ -1220,6 +1223,7 @@ export default function InsightsClient() {
         }
         setBookmarkedIds(prev => new Set(prev).add(group.id))
       }
+      setBookmarkRefreshKey(k => k + 1)
     } catch (err) {
       setBookmarkError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
@@ -1437,7 +1441,7 @@ export default function InsightsClient() {
           )}
 
           {/* Bookmarked Insights */}
-          <BookmarkedInsightsSection selectedTeams={selectedTeams} />
+          <BookmarkedInsightsSection selectedTeams={selectedTeams} refreshKey={bookmarkRefreshKey} />
         </div>
       )}
 

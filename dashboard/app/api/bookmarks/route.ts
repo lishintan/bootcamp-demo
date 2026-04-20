@@ -51,16 +51,20 @@ async function readBookmarks(): Promise<Bookmark[]> {
 async function writeBookmarks(bookmarks: Bookmark[]): Promise<void> {
   if (REDIS_URL && REDIS_TOKEN) {
     try {
-      await fetch(`${REDIS_URL}/set/${REDIS_KEY}`, {
+      const res = await fetch(`${REDIS_URL}/pipeline`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${REDIS_TOKEN}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(JSON.stringify(bookmarks)),
+        body: JSON.stringify([['SET', REDIS_KEY, JSON.stringify(bookmarks)]]),
       })
-    } catch {
-      // non-fatal — bookmark saved in memory until next cold start
+      if (!res.ok) {
+        const text = await res.text()
+        console.error('[writeBookmarks] Redis pipeline failed:', res.status, text)
+      }
+    } catch (err) {
+      console.error('[writeBookmarks] fetch error:', err)
     }
     return
   }
