@@ -177,33 +177,49 @@ function singleLinkageClusters(
 
 // ─── Hook generation ─────────────────────────────────────────────────────────
 
-function generateHook(group: JiraTicket[]): string {
-  // Use the representative ticket (earliest created, which is last in DESC order)
-  const rep = group[group.length - 1]
-  const desc = rep.description?.trim()
-
-  let source = ''
-  if (desc && desc.length > 30) {
-    // Take first sentence
-    const match = desc.match(/^([^.!?]+[.!?])/)
-    source = match ? match[1].trim() : desc.substring(0, 150)
-  } else {
-    source = rep.summary
-  }
-
-  // Clean ADF/markdown artefacts
-  source = source
+function cleanText(text: string): string {
+  return text
     .replace(/\*\*(.+?)\*\*/g, '$1')
     .replace(/\*(.+?)\*/g, '$1')
     .replace(/`(.+?)`/g, '$1')
     .replace(/\[(.+?)\]\(.+?\)/g, '$1')
     .replace(/#+\s*/g, '')
+    .replace(/\s+/g, ' ')
     .trim()
+}
 
-  if (source.length > 150) source = source.substring(0, 147) + '...'
-  if (source.length > 0 && !/[.!?]$/.test(source)) source += '.'
+function generateHook(group: JiraTicket[]): string {
+  // Pick the ticket with the richest description (prefer higher impact score as tiebreak)
+  const withDesc = group
+    .filter(t => {
+      const d = t.description?.trim() ?? ''
+      return d.length > 40 && !/^(see |refer |attached|n\/a|none)/i.test(d)
+    })
+    .sort((a, b) => {
+      const lenDiff = (b.description?.length ?? 0) - (a.description?.length ?? 0)
+      return lenDiff !== 0 ? lenDiff : (b.impactScore ?? 0) - (a.impactScore ?? 0)
+    })
 
-  return source || rep.summary + '.'
+  const bestDesc = withDesc[0]?.description?.trim()
+
+  if (bestDesc) {
+    const cleaned = cleanText(bestDesc)
+    // Take up to 3 sentences for meaningful context
+    const sentences = cleaned
+      .split(/(?<=[.!?])\s+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 10)
+    const excerpt = sentences.slice(0, 3).join(' ')
+    if (excerpt.length > 220) return excerpt.substring(0, 217) + '...'
+    if (excerpt.length > 0) return excerpt
+  }
+
+  // Fallback: use the best summary from the group
+  const bestSummary = group
+    .sort((a, b) => (b.impactScore ?? 0) - (a.impactScore ?? 0))[0]
+    .summary
+  const cleaned = cleanText(bestSummary)
+  return cleaned.length > 220 ? cleaned.substring(0, 217) + '...' : cleaned
 }
 
 // ─── Why Tag classification ───────────────────────────────────────────────────

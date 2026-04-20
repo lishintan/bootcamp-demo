@@ -25,15 +25,19 @@ const LOCAL_FILE = path.join(process.cwd(), 'data', 'bookmarks.json')
 
 async function readBookmarks(): Promise<Bookmark[]> {
   if (REDIS_URL && REDIS_TOKEN) {
-    const res = await fetch(`${REDIS_URL}/get/${REDIS_KEY}`, {
-      headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
-      cache: 'no-store',
-    })
-    const json = await res.json() as { result: string | null }
-    if (!json.result) return []
-    return JSON.parse(json.result) as Bookmark[]
+    try {
+      const res = await fetch(`${REDIS_URL}/get/${REDIS_KEY}`, {
+        headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
+        cache: 'no-store',
+      })
+      if (!res.ok) return []
+      const json = await res.json() as { result: string | null }
+      if (!json.result) return []
+      return JSON.parse(json.result) as Bookmark[]
+    } catch {
+      return []
+    }
   }
-  // Local fallback
   try {
     const content = await fs.readFile(LOCAL_FILE, 'utf-8')
     return JSON.parse(content) as Bookmark[]
@@ -44,18 +48,25 @@ async function readBookmarks(): Promise<Bookmark[]> {
 
 async function writeBookmarks(bookmarks: Bookmark[]): Promise<void> {
   if (REDIS_URL && REDIS_TOKEN) {
-    await fetch(`${REDIS_URL}/set/${REDIS_KEY}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${REDIS_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(JSON.stringify(bookmarks)),
-    })
+    try {
+      await fetch(`${REDIS_URL}/set/${REDIS_KEY}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${REDIS_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(JSON.stringify(bookmarks)),
+      })
+    } catch {
+      // non-fatal — bookmark saved in memory until next cold start
+    }
     return
   }
-  // Local fallback
-  await fs.writeFile(LOCAL_FILE, JSON.stringify(bookmarks, null, 2), 'utf-8')
+  try {
+    await fs.writeFile(LOCAL_FILE, JSON.stringify(bookmarks, null, 2), 'utf-8')
+  } catch {
+    // read-only filesystem on Vercel — no-op without Redis
+  }
 }
 
 // GET /api/bookmarks?team=<team>&status=open|archived

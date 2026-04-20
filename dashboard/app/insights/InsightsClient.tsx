@@ -516,8 +516,8 @@ function InsightCard({
   isSaving: boolean
   onToggleBookmark: (group: InsightGroup) => void
 }) {
-  const truncatedHook = group.hook.length > 120
-    ? group.hook.substring(0, 117) + '...'
+  const truncatedHook = group.hook.length > 200
+    ? group.hook.substring(0, 197) + '...'
     : group.hook
   const primarySource = group.sources[0] ?? null
 
