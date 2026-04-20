@@ -1,25 +1,7 @@
-export const dynamic = 'force-dynamic'
-
 import Link from 'next/link'
-import { fetchJiraTickets, pickBestQuote } from '@/lib/jira'
+import HomeStats from '@/components/HomeStats'
 
-async function getJiraData() {
-  try {
-    const result = await fetchJiraTickets()
-    return { tickets: result.tickets, total: result.total, error: null }
-  } catch (err) {
-    console.error('[Home] Jira fetch error:', err)
-    return { tickets: [], total: 0, error: err instanceof Error ? err.message : 'Unknown error' }
-  }
-}
-
-export default async function HomePage() {
-  const { tickets, total, error } = await getJiraData()
-  const quote = tickets.length > 0 ? pickBestQuote(tickets) : null
-
-  const parkingLotCount = tickets.filter(t => t.status.toLowerCase() === 'parking lot').length
-  const wontDoCount = tickets.filter(t => t.status.toLowerCase() === "won't do").length
-
+export default function HomePage() {
   return (
     <div className="space-y-10">
       {/* Hero */}
@@ -50,25 +32,7 @@ export default async function HomePage() {
               Browse semantically clustered product feedback — bugs and feature requests grouped by theme, ranked by temperature.
             </p>
 
-            {/* Ticket count stats */}
-            <div className="flex gap-4">
-              <div className="bg-gray-700 rounded-lg px-3 py-2 text-center">
-                <div className="text-lg font-bold text-white">{parkingLotCount}</div>
-                <div className="text-xs text-gray-400">Parking Lot</div>
-              </div>
-              <div className="bg-gray-700 rounded-lg px-3 py-2 text-center">
-                <div className="text-lg font-bold text-white">{wontDoCount}</div>
-                <div className="text-xs text-gray-400">Won&apos;t Do</div>
-              </div>
-              <div className="bg-indigo-900/40 rounded-lg px-3 py-2 text-center">
-                <div className="text-lg font-bold text-indigo-300">{total}</div>
-                <div className="text-xs text-indigo-400">Total tickets</div>
-              </div>
-            </div>
-
-            {error && (
-              <p className="mt-3 text-xs text-red-400">Data load error — check API connection</p>
-            )}
+            <HomeStats />
           </div>
         </Link>
 
@@ -104,30 +68,9 @@ export default async function HomePage() {
         </Link>
       </div>
 
-      {/* User Quote */}
-      {quote && (
-        <div className="bg-gray-800 border-l-4 border-indigo-500 rounded-r-xl p-6">
-          <div className="flex items-start gap-4">
-            <svg className="w-8 h-8 text-indigo-400 flex-shrink-0 mt-1" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z" />
-            </svg>
-            <div>
-              <p className="text-gray-200 text-base italic leading-relaxed">{quote}</p>
-              <p className="text-gray-500 text-sm mt-3">— From the Jira Product Feedback board</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {!quote && tickets.length === 0 && !error && (
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 text-center text-gray-500 text-sm">
-          Loading feedback data…
-        </div>
-      )}
-
       {/* Status footer */}
       <div className="text-xs text-gray-600 text-center">
-        Data loaded from Jira and Airtable on each page request &bull; Sprint 1
+        Data loaded from Jira and Airtable &bull; Product Intelligence Dashboard
       </div>
     </div>
   )
