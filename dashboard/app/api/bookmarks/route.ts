@@ -33,14 +33,16 @@ async function readBookmarks(): Promise<Bookmark[]> {
       if (!res.ok) return []
       const json = await res.json() as { result: string | null }
       if (!json.result) return []
-      return JSON.parse(json.result) as Bookmark[]
+      const parsed = JSON.parse(json.result)
+      return Array.isArray(parsed) ? parsed as Bookmark[] : []
     } catch {
       return []
     }
   }
   try {
     const content = await fs.readFile(LOCAL_FILE, 'utf-8')
-    return JSON.parse(content) as Bookmark[]
+    const parsed = JSON.parse(content)
+    return Array.isArray(parsed) ? parsed as Bookmark[] : []
   } catch {
     return []
   }
