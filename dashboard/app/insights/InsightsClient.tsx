@@ -737,11 +737,11 @@ function BookmarkedInsightsSection({
       if (activeTeam !== 'All Teams') params.set('team', activeTeam)
 
       const resp = await fetch(`/api/bookmarks?${params.toString()}`)
-      if (!resp.ok) throw new Error('Failed to load bookmarks')
+      if (!resp.ok) { setBookmarks([]); return }
       const data = await resp.json() as { bookmarks: Bookmark[] }
-      setBookmarks(data.bookmarks)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error')
+      setBookmarks(data.bookmarks ?? [])
+    } catch {
+      setBookmarks([])
     } finally {
       setLoading(false)
     }
@@ -1163,12 +1163,14 @@ export default function InsightsClient() {
     }
   }, [phase, refreshBookmarkedIds])
 
-  const handleToggleBookmark = useCallback(async (group: InsightGroup) => {
+  const handleToggleBookmark = useCallback(async (group: InsightGroup, userOverride?: string) => {
     // Clear previous bookmark errors
     setBookmarkError(null)
 
+    const user = userOverride ?? currentUser
+
     // Require user identity — prompt inline instead of error
-    if (!currentUser) {
+    if (!user) {
       setPendingBookmark(group)
       return
     }
@@ -1209,7 +1211,7 @@ export default function InsightsClient() {
             insightCategory: group.category,
             insightTemperature: group.temperature,
             teamName: group.teamName ?? 'Unknown',
-            bookmarkedBy: currentUser,
+            bookmarkedBy: user,
           }),
         })
         if (!resp.ok) throw new Error('Failed to create bookmark')
@@ -1454,8 +1456,9 @@ export default function InsightsClient() {
             setCurrentUser(name)
             localStorage.setItem(STORAGE_KEY, name)
             window.dispatchEvent(new CustomEvent('pid:userChanged', { detail: name }))
+            const group = pendingBookmark
             setPendingBookmark(null)
-            handleToggleBookmark(pendingBookmark)
+            handleToggleBookmark(group, name)
           }}
           onCancel={() => setPendingBookmark(null)}
         />
