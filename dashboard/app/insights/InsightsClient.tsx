@@ -917,6 +917,63 @@ function BookmarkedInsightsSection({
   )
 }
 
+// ─── Name Prompt Modal ────────────────────────────────────────────────────────
+
+function NamePromptModal({
+  onSelect,
+  onCancel,
+}: {
+  onSelect: (name: string) => void
+  onCancel: () => void
+}) {
+  const [users, setUsers] = useState<{ id: string; preferredName: string }[]>([])
+  const [selected, setSelected] = useState('')
+
+  useEffect(() => {
+    fetch('/api/users')
+      .then(r => r.json())
+      .then((d: { success: boolean; users: { id: string; preferredName: string }[] }) => {
+        if (d.success) setUsers(d.users)
+      })
+      .catch(() => {})
+  }, [])
+
+  return (
+    <div className="fixed inset-0 z-60 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/70" onClick={onCancel} />
+      <div className="relative bg-gray-800 border border-gray-600 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+        <h3 className="text-white font-semibold text-base mb-1">Who are you?</h3>
+        <p className="text-gray-400 text-sm mb-4">Select your name to save this bookmark.</p>
+        <select
+          value={selected}
+          onChange={e => setSelected(e.target.value)}
+          className="w-full appearance-none bg-gray-700 text-white text-sm rounded-lg px-3 py-2.5 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-4"
+        >
+          <option value="">Select your name…</option>
+          {users.map(u => (
+            <option key={u.id} value={u.preferredName}>{u.preferredName}</option>
+          ))}
+        </select>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { if (selected) onSelect(selected) }}
+            disabled={!selected}
+            className="flex-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg py-2 transition-colors"
+          >
+            Save Bookmark
+          </button>
+          <button
+            onClick={onCancel}
+            className="px-4 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm rounded-lg py-2 transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Team Filter Screen ───────────────────────────────────────────────────────
 
 function TeamFilterScreen({
@@ -1065,20 +1122,27 @@ export default function InsightsClient() {
   const [bookmarkedIds, setBookmarkedIds] = useState<Set<string>>(new Set())
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set())
   const [bookmarkError, setBookmarkError] = useState<string | null>(null)
+  const [pendingBookmark, setPendingBookmark] = useState<InsightGroup | null>(null)
 
   // Load current user from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEY) ?? ''
     setCurrentUser(saved)
 
-    // Listen for changes in localStorage (from the TopNav dropdown)
+    // Cross-tab: storage event
     function handleStorage(e: StorageEvent) {
-      if (e.key === STORAGE_KEY) {
-        setCurrentUser(e.newValue ?? '')
-      }
+      if (e.key === STORAGE_KEY) setCurrentUser(e.newValue ?? '')
+    }
+    // Same-tab: custom event dispatched by UserIdentityDropdown
+    function handleCustom(e: Event) {
+      setCurrentUser((e as CustomEvent<string>).detail ?? '')
     }
     window.addEventListener('storage', handleStorage)
-    return () => window.removeEventListener('storage', handleStorage)
+    window.addEventListener('pid:userChanged', handleCustom)
+    return () => {
+      window.removeEventListener('storage', handleStorage)
+      window.removeEventListener('pid:userChanged', handleCustom)
+    }
   }, [])
 
   // Load current bookmarks whenever we have insight data (to show filled icons)
@@ -1103,9 +1167,9 @@ export default function InsightsClient() {
     // Clear previous bookmark errors
     setBookmarkError(null)
 
-    // Require user identity
+    // Require user identity — prompt inline instead of error
     if (!currentUser) {
-      setBookmarkError('Please select your name from the dropdown before bookmarking.')
+      setPendingBookmark(group)
       return
     }
 
@@ -1380,6 +1444,20 @@ export default function InsightsClient() {
           bookmarkedIds={bookmarkedIds}
           savingIds={savingIds}
           onToggleBookmark={handleToggleBookmark}
+        />
+      )}
+
+      {/* Name-selection prompt — shown when user tries to bookmark without selecting name */}
+      {pendingBookmark && (
+        <NamePromptModal
+          onSelect={(name) => {
+            setCurrentUser(name)
+            localStorage.setItem(STORAGE_KEY, name)
+            window.dispatchEvent(new CustomEvent('pid:userChanged', { detail: name }))
+            setPendingBookmark(null)
+            handleToggleBookmark(pendingBookmark)
+          }}
+          onCancel={() => setPendingBookmark(null)}
         />
       )}
     </div>

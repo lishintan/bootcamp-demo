@@ -43,6 +43,8 @@ export default function UserIdentityDropdown() {
     } else {
       localStorage.removeItem(STORAGE_KEY)
     }
+    // Notify same-tab listeners (storage event only fires in other tabs)
+    window.dispatchEvent(new CustomEvent('pid:userChanged', { detail: val }))
   }
 
   return (
