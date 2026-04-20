@@ -120,7 +120,7 @@ function mapIssue(issue: JiraIssueRaw): JiraTicket {
 
 let _cache: { tickets: JiraTicket[]; total: number } | null = null
 let _cacheExpiry = 0
-const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
+const CACHE_TTL_MS = 60 * 60 * 1000 // 1 hour
 
 export async function fetchJiraTickets(): Promise<{ tickets: JiraTicket[]; total: number }> {
   if (_cache && Date.now() < _cacheExpiry) return _cache
