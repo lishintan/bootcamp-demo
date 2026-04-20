@@ -118,7 +118,13 @@ function mapIssue(issue: JiraIssueRaw): JiraTicket {
   }
 }
 
+let _cache: { tickets: JiraTicket[]; total: number } | null = null
+let _cacheExpiry = 0
+const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
+
 export async function fetchJiraTickets(): Promise<{ tickets: JiraTicket[]; total: number }> {
+  if (_cache && Date.now() < _cacheExpiry) return _cache
+
   const baseUrl = process.env.JIRA_BASE_URL!
   const auth = getJiraAuth()
 
@@ -162,7 +168,9 @@ export async function fetchJiraTickets(): Promise<{ tickets: JiraTicket[]; total
     isLast = data.isLast ?? true // fallback to true if missing
   } while (!isLast && nextPageToken)
 
-  return { tickets: allTickets, total: allTickets.length }
+  _cache = { tickets: allTickets, total: allTickets.length }
+  _cacheExpiry = Date.now() + CACHE_TTL_MS
+  return _cache
 }
 
 // Pick the single most comprehensive/clear quote from ticket descriptions
