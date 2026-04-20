@@ -1207,16 +1207,16 @@ export default function InsightsClient() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             insightId: group.id,
-            insightHook: group.hook,
-            insightCategory: group.category,
-            insightTemperature: group.temperature,
+            insightHook: group.hook || group.representativeTicket.summary || group.id,
+            insightCategory: group.category || 'Feedback',
+            insightTemperature: group.temperature || 'Medium',
             teamName: group.teamName || 'Unknown',
             bookmarkedBy: user,
           }),
         })
         if (!resp.ok) {
           const errData = await resp.json().catch(() => ({})) as { error?: string }
-          throw new Error(errData.error ?? 'Failed to create bookmark')
+          throw new Error(`[${resp.status}] ${errData.error ?? 'Failed to create bookmark'}`)
         }
         setBookmarkedIds(prev => new Set(prev).add(group.id))
       }
