@@ -8,9 +8,10 @@ import UserSearchCombobox from '@/components/UserSearchCombobox'
 
 const TEAMS: { name: string; jiraNames: string[]; color: string; icon: string }[] = [
   { name: 'Transform', jiraNames: ['Transform Stream', 'Transform'], color: 'indigo', icon: '⚡' },
-  { name: 'Engage', jiraNames: ['Engage Stream', 'Engage', 'PBS Stream'], color: 'emerald', icon: '💬' },
+  { name: 'Engage', jiraNames: ['Engage Stream', 'Engage'], color: 'emerald', icon: '💬' },
   { name: 'Identity & Payments', jiraNames: ['IP Team', 'Identity & Payments'], color: 'purple', icon: '🔐' },
-  { name: 'Academy', jiraNames: ['Academy', 'Academy Stream', 'Acquire Stream'], color: 'amber', icon: '🎓' },
+  { name: 'Academy', jiraNames: ['Academy', 'Academy Stream', 'PBS Stream'], color: 'amber', icon: '🎓' },
+  { name: 'Acquire', jiraNames: ['Acquire Stream', 'Acquire'], color: 'orange', icon: '🚀' },
   { name: 'AI & Innovation', jiraNames: ['AI & Innovation Stream', 'AI & Innovation'], color: 'cyan', icon: '🤖' },
   { name: 'Content Ops', jiraNames: ['Content Ops'], color: 'gray', icon: '📦' },
 ]
@@ -50,6 +51,13 @@ const TEAM_COLORS: Record<string, { border: string; bg: string; text: string; se
     text: 'text-cyan-300',
     selectedBg: 'bg-cyan-700',
     selectedBorder: 'border-cyan-400',
+  },
+  orange: {
+    border: 'border-orange-800',
+    bg: 'bg-orange-950/40',
+    text: 'text-orange-300',
+    selectedBg: 'bg-orange-700',
+    selectedBorder: 'border-orange-400',
   },
   gray: {
     border: 'border-gray-700',
