@@ -736,12 +736,22 @@ function BookmarkedInsightsSection({
     try {
       const params = new URLSearchParams()
       params.set('status', showArchived ? 'archived' : 'open')
-      if (activeTeam !== 'All Teams') params.set('team', activeTeam)
+      // Fetch all and filter client-side — avoids display name vs Jira name mismatch
 
       const resp = await fetch(`/api/bookmarks?${params.toString()}`)
       if (!resp.ok) { setBookmarks([]); return }
       const data = await resp.json() as { bookmarks: Bookmark[] }
-      setBookmarks(data.bookmarks ?? [])
+      let all = data.bookmarks ?? []
+
+      if (activeTeam !== 'All Teams') {
+        const team = TEAMS.find(t => t.name === activeTeam)
+        if (team) {
+          const jiraNames = new Set(team.jiraNames)
+          all = all.filter(b => jiraNames.has(b.teamName))
+        }
+      }
+
+      setBookmarks(all)
     } catch {
       setBookmarks([])
     } finally {

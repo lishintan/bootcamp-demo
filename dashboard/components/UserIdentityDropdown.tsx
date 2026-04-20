@@ -21,6 +21,12 @@ export default function UserIdentityDropdown() {
     const saved = localStorage.getItem(STORAGE_KEY)
     if (saved) setSelected(saved)
 
+    // Sync when name is selected from another component (e.g. NamePromptModal)
+    function handleCustom(e: Event) {
+      setSelected((e as CustomEvent<string>).detail ?? '')
+    }
+    window.addEventListener('pid:userChanged', handleCustom)
+
     // Fetch users from API
     fetch('/api/users')
       .then(r => r.json())
@@ -33,6 +39,8 @@ export default function UserIdentityDropdown() {
       })
       .catch(err => setError(err.message))
       .finally(() => setLoading(false))
+
+    return () => window.removeEventListener('pid:userChanged', handleCustom)
   }, [])
 
   function handleChange(e: React.ChangeEvent<HTMLSelectElement>) {
