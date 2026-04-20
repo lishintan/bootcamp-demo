@@ -1210,11 +1210,14 @@ export default function InsightsClient() {
             insightHook: group.hook,
             insightCategory: group.category,
             insightTemperature: group.temperature,
-            teamName: group.teamName ?? 'Unknown',
+            teamName: group.teamName || 'Unknown',
             bookmarkedBy: user,
           }),
         })
-        if (!resp.ok) throw new Error('Failed to create bookmark')
+        if (!resp.ok) {
+          const errData = await resp.json().catch(() => ({})) as { error?: string }
+          throw new Error(errData.error ?? 'Failed to create bookmark')
+        }
         setBookmarkedIds(prev => new Set(prev).add(group.id))
       }
     } catch (err) {

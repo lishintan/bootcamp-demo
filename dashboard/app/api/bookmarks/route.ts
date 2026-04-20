@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
     const { insightId, insightHook, insightCategory, insightTemperature, teamName, bookmarkedBy } = body
 
-    if (!insightId || !insightHook || !insightCategory || !insightTemperature || !teamName || !bookmarkedBy) {
+    if (!insightId || !insightHook || !insightCategory || !insightTemperature || !bookmarkedBy) {
       return Response.json({ error: 'Missing required fields' }, { status: 400 })
     }
 
