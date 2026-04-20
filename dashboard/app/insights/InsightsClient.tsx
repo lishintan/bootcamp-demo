@@ -712,9 +712,13 @@ function CategorySection({
 function BookmarkedInsightsSection({
   selectedTeams,
   refreshKey,
+  allGroups,
+  onSelectGroup,
 }: {
   selectedTeams: string[]
   refreshKey: number
+  allGroups: InsightGroup[]
+  onSelectGroup: (group: InsightGroup) => void
 }) {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([])
   const [loading, setLoading] = useState(true)
@@ -870,10 +874,13 @@ function BookmarkedInsightsSection({
       {/* Bookmark list */}
       {!loading && !error && bookmarks.length > 0 && (
         <ul className="space-y-2">
-          {bookmarks.map(bm => (
+          {bookmarks.map(bm => {
+            const matchedGroup = allGroups.find(g => g.id === bm.insightId)
+            return (
             <li
               key={bm.id}
-              className="bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 flex items-start justify-between gap-4"
+              onClick={() => matchedGroup && onSelectGroup(matchedGroup)}
+              className={`bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 flex items-start justify-between gap-4 ${matchedGroup ? 'cursor-pointer hover:border-gray-500 hover:bg-gray-750 transition-colors' : ''}`}
             >
               <div className="flex-1 min-w-0 space-y-1">
                 <p className="text-sm text-white font-medium leading-snug line-clamp-2">
@@ -911,7 +918,7 @@ function BookmarkedInsightsSection({
                 </div>
               </div>
               <button
-                onClick={() => handleArchive(bm)}
+                onClick={e => { e.stopPropagation(); handleArchive(bm) }}
                 disabled={archivingId === bm.id}
                 className="flex-shrink-0 text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 rounded-lg px-3 py-1.5 transition-colors disabled:opacity-50 disabled:cursor-wait whitespace-nowrap"
               >
@@ -922,7 +929,8 @@ function BookmarkedInsightsSection({
                   : 'Restore'}
               </button>
             </li>
-          ))}
+            )
+          })}
         </ul>
       )}
     </section>
@@ -1451,7 +1459,12 @@ export default function InsightsClient() {
           )}
 
           {/* Bookmarked Insights */}
-          <BookmarkedInsightsSection selectedTeams={selectedTeams} refreshKey={bookmarkRefreshKey} />
+          <BookmarkedInsightsSection
+            selectedTeams={selectedTeams}
+            refreshKey={bookmarkRefreshKey}
+            allGroups={[...(openData?.groups ?? []), ...(deprioritizedData?.groups ?? [])]}
+            onSelectGroup={setSelectedGroup}
+          />
         </div>
       )}
 
