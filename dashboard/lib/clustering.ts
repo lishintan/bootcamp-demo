@@ -312,19 +312,22 @@ export function clusterTickets(
 
   const threshold = aiProvider === 'none' ? 0.25 : 0.80
 
-  // Separate Bug and Feedback pools (rule: Bug and Feedback never mix)
-  const bugs = tickets.filter(t => t.category === 'Bug')
-  const feedback = tickets.filter(t => t.category === 'Feedback')
-  const uncategorised = tickets.filter(
-    t => t.category !== 'Bug' && t.category !== 'Feedback',
-  )
+  // Cluster within each team independently — prevents cross-team contamination
+  const teamNames = [...new Set(tickets.map(t => t.teamName ?? ''))]
 
-  const allGroups = [
-    ...clusterPool(bugs, 'Bug', threshold),
-    ...clusterPool(feedback, 'Feedback', threshold),
-    // Treat uncategorised as Feedback for grouping purposes
-    ...clusterPool(uncategorised, 'Feedback', threshold),
-  ]
+  const allGroups = teamNames.flatMap(team => {
+    const teamTickets = tickets.filter(t => (t.teamName ?? '') === team)
+    const bugs = teamTickets.filter(t => t.category === 'Bug')
+    const feedback = teamTickets.filter(t => t.category === 'Feedback')
+    const uncategorised = teamTickets.filter(
+      t => t.category !== 'Bug' && t.category !== 'Feedback',
+    )
+    return [
+      ...clusterPool(bugs, 'Bug', threshold),
+      ...clusterPool(feedback, 'Feedback', threshold),
+      ...clusterPool(uncategorised, 'Feedback', threshold),
+    ]
+  })
 
   // Compute temperatures across all groups
   const now = Date.now()
