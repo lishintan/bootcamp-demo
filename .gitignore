@@ -2,3 +2,13 @@ node_modules/
 dist/
 .claude/settings.local.json
 .claude/build-state.json
+
+# Runtime state and logs
+.run-state.json
+logs/
+
+# Won't Do pipeline state (runtime, not committed)
+state/wont-do-state.json
+
+# Environment
+.env

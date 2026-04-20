@@ -1,0 +1,37 @@
+{
+  "name": "automated-feedback-prioritization",
+  "version": "1.0.0",
+  "description": "Automated Feedback Prioritization & Insight Delivery pipeline",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "group": "ts-node src/pipeline/group.ts",
+    "link": "ts-node src/pipeline/link.ts",
+    "wont-do": "ts-node src/pipeline/wont-do.ts",
+    "start": "node dist/pipeline/group.js",
+    "start:link": "node dist/pipeline/link.js",
+    "start:wont-do": "node dist/pipeline/wont-do.js",
+    "server": "ts-node src/wont-do/server.ts",
+    "weekly-digest": "ts-node src/pipeline/weekly-digest.ts",
+    "start:weekly-digest": "node dist/pipeline/weekly-digest.js",
+    "start:server": "node dist/wont-do/server.js",
+    "monthly-digest": "ts-node src/pipeline/monthly-digest.ts",
+    "start:monthly-digest": "node dist/pipeline/monthly-digest.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.36.3",
+    "@slack/web-api": "^7.3.4",
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "express": "^4.18.3",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.7",
+    "@types/node-cron": "^3.0.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3"
+  }
+}
