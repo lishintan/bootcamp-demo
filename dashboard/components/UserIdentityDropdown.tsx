@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import UserSearchCombobox from './UserSearchCombobox'
 
 interface User {
   id: string
@@ -17,17 +18,14 @@ export default function UserIdentityDropdown() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    // Restore selection from localStorage
     const saved = localStorage.getItem(STORAGE_KEY)
     if (saved) setSelected(saved)
 
-    // Sync when name is selected from another component (e.g. NamePromptModal)
     function handleCustom(e: Event) {
       setSelected((e as CustomEvent<string>).detail ?? '')
     }
     window.addEventListener('pid:userChanged', handleCustom)
 
-    // Fetch users from API
     fetch('/api/users')
       .then(r => r.json())
       .then(data => {
@@ -43,46 +41,32 @@ export default function UserIdentityDropdown() {
     return () => window.removeEventListener('pid:userChanged', handleCustom)
   }, [])
 
-  function handleChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const val = e.target.value
-    setSelected(val)
-    if (val) {
-      localStorage.setItem(STORAGE_KEY, val)
+  function handleChange(name: string) {
+    setSelected(name)
+    if (name) {
+      localStorage.setItem(STORAGE_KEY, name)
     } else {
       localStorage.removeItem(STORAGE_KEY)
     }
-    // Notify same-tab listeners (storage event only fires in other tabs)
-    window.dispatchEvent(new CustomEvent('pid:userChanged', { detail: val }))
+    window.dispatchEvent(new CustomEvent('pid:userChanged', { detail: name }))
   }
 
   return (
     <div className="flex items-center gap-2">
       <span className="text-sm text-gray-400 whitespace-nowrap">Viewing as:</span>
-      <div className="relative">
+      <div className="relative min-w-[180px]">
         {loading ? (
           <div className="h-9 w-48 bg-gray-700 rounded-lg animate-pulse" />
         ) : error ? (
           <span className="text-xs text-red-400">Could not load users</span>
         ) : (
-          <select
+          <UserSearchCombobox
+            users={users}
             value={selected}
             onChange={handleChange}
-            className="appearance-none bg-gray-700 text-white text-sm rounded-lg px-3 py-2 pr-8 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent cursor-pointer min-w-[180px]"
-          >
-            <option value="">Select your name…</option>
-            {users.map(u => (
-              <option key={u.id} value={u.preferredName}>
-                {u.preferredName}
-              </option>
-            ))}
-          </select>
-        )}
-        {!loading && !error && (
-          <div className="pointer-events-none absolute inset-y-0 right-2 flex items-center">
-            <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 20 20" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 8l4 4 4-4" />
-            </svg>
-          </div>
+            placeholder="Select your name…"
+            inputClassName="w-full appearance-none bg-gray-700 text-white text-sm rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent cursor-pointer"
+          />
         )}
       </div>
     </div>

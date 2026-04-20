@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { InsightGroup } from '@/lib/clustering'
+import UserSearchCombobox from '@/components/UserSearchCombobox'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -963,18 +964,15 @@ function NamePromptModal({
       <div className="absolute inset-0 bg-black/70" onClick={onCancel} />
       <div className="relative bg-gray-800 border border-gray-600 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
         <h3 className="text-white font-semibold text-base mb-1">Who are you?</h3>
-        <p className="text-gray-400 text-sm mb-4">Select your name to save this bookmark.</p>
-        <select
+        <p className="text-gray-400 text-sm mb-4">Search and select your name to save this bookmark.</p>
+        <UserSearchCombobox
+          users={users}
           value={selected}
-          onChange={e => setSelected(e.target.value)}
-          className="w-full appearance-none bg-gray-700 text-white text-sm rounded-lg px-3 py-2.5 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-4"
-        >
-          <option value="">Select your name…</option>
-          {users.map(u => (
-            <option key={u.id} value={u.preferredName}>{u.preferredName}</option>
-          ))}
-        </select>
-        <div className="flex gap-2">
+          onChange={setSelected}
+          placeholder="Search your name…"
+          inputClassName="w-full appearance-none bg-gray-700 text-white text-sm rounded-lg px-3 py-2.5 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 mb-4"
+        />
+        <div className="flex gap-2 mt-4">
           <button
             onClick={() => { if (selected) onSelect(selected) }}
             disabled={!selected}
