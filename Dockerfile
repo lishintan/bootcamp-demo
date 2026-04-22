@@ -1,31 +1,19 @@
-FROM node:20-alpine AS base
+FROM node:20-alpine
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-FROM base AS deps
 WORKDIR /app
-COPY dashboard/package.json dashboard/pnpm-lock.yaml* ./
+
+# Install dependencies
+COPY dashboard/package.json dashboard/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
-FROM base AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+# Build
 COPY dashboard/ .
 RUN pnpm build
 
-FROM base AS runner
-WORKDIR /app
-ENV NODE_ENV=production
-
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
-
-COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-
-USER nextjs
-EXPOSE 8080
+# Cloud Run injects PORT=8080
 ENV PORT=8080
-ENV HOSTNAME="0.0.0.0"
+ENV HOSTNAME=0.0.0.0
+EXPOSE 8080
 
-CMD ["node", "server.js"]
+CMD ["pnpm", "start"]
