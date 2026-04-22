@@ -16,4 +16,4 @@ ENV PORT=8080
 ENV HOSTNAME=0.0.0.0
 EXPOSE 8080
 
-CMD ["pnpm", "start"]
+CMD ["sh", "-c", "node_modules/.bin/next start -p ${PORT:-8080} -H 0.0.0.0"]
