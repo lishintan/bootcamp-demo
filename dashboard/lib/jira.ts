@@ -41,8 +41,9 @@ const FIELDS_PARAM = [
 
 interface JiraSearchResponse {
   issues: JiraIssueRaw[]
-  nextPageToken?: string
-  isLast: boolean
+  total: number
+  startAt: number
+  maxResults: number
 }
 
 interface JiraIssueRaw {
@@ -174,18 +175,16 @@ export async function fetchJiraTickets(): Promise<{ tickets: JiraTicket[]; total
   const jql = `project=PF AND status in ("Parking Lot","Won't Do") ORDER BY created DESC`
 
   const allTickets: JiraTicket[] = []
-  let nextPageToken: string | undefined
-  let isLast = false
   const maxResults = 100
+  let startAt = 0
+  let total = Infinity
 
-  do {
-    const url = new URL(`${baseUrl}/rest/api/3/search/jql`)
+  while (allTickets.length < total) {
+    const url = new URL(`${baseUrl}/rest/api/3/search`)
     url.searchParams.set('jql', jql)
     url.searchParams.set('maxResults', String(maxResults))
+    url.searchParams.set('startAt', String(startAt))
     url.searchParams.set('fields', FIELDS_PARAM)
-    if (nextPageToken) {
-      url.searchParams.set('nextPageToken', nextPageToken)
-    }
 
     const resp = await fetch(url.toString(), {
       headers: {
@@ -201,14 +200,15 @@ export async function fetchJiraTickets(): Promise<{ tickets: JiraTicket[]; total
     }
 
     const data: JiraSearchResponse = await resp.json()
+    total = data.total
 
     for (const issue of data.issues) {
       allTickets.push(mapIssue(issue))
     }
 
-    nextPageToken = data.nextPageToken
-    isLast = data.isLast ?? true // fallback to true if missing
-  } while (!isLast && nextPageToken)
+    startAt += data.issues.length
+    if (data.issues.length < maxResults) break
+  }
 
   const result = { tickets: allTickets, total: allTickets.length }
 
