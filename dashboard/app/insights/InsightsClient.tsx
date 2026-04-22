@@ -1273,7 +1273,8 @@ export default function InsightsClient() {
       ])
 
       if (!openResp.ok || !depResp.ok) {
-        throw new Error('Failed to load insights')
+        const errBody = await (!openResp.ok ? openResp : depResp).json().catch(() => ({}))
+        throw new Error(errBody?.error || `API error ${(!openResp.ok ? openResp : depResp).status}`)
       }
 
       const [openJson, depJson]: [InsightData, InsightData] = await Promise.all([
