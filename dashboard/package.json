@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "node server.js",
+    "start": "node -e \"require('http').createServer((q,r)=>{r.writeHead(200);r.end('ok')}).listen(parseInt(process.env.PORT)||8080,'0.0.0.0',()=>console.log('up on',process.env.PORT))\"",
     "lint": "eslint"
   },
   "dependencies": {
