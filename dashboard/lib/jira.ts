@@ -42,7 +42,6 @@ const FIELDS_PARAM = [
 interface JiraSearchResponse {
   issues: JiraIssueRaw[]
   nextPageToken?: string
-  isLast: boolean
 }
 
 interface JiraIssueRaw {
@@ -175,7 +174,6 @@ export async function fetchJiraTickets(): Promise<{ tickets: JiraTicket[]; total
 
   const allTickets: JiraTicket[] = []
   let nextPageToken: string | undefined
-  let isLast = false
   const maxResults = 100
 
   do {
@@ -206,9 +204,8 @@ export async function fetchJiraTickets(): Promise<{ tickets: JiraTicket[]; total
       allTickets.push(mapIssue(issue))
     }
 
-    nextPageToken = data.nextPageToken
-    isLast = data.isLast ?? true
-  } while (!isLast && nextPageToken)
+    nextPageToken = data.issues.length === maxResults ? data.nextPageToken : undefined
+  } while (nextPageToken)
 
   const result = { tickets: allTickets, total: allTickets.length }
 
