@@ -155,6 +155,15 @@ function singleLinkageClusters(
     if (px !== py) parent[px] = py
   }
 
+  // Pre-pass: force-union tickets with the same non-null featureName — same feature = same insight
+  for (let i = 0; i < n; i++) {
+    const fi = tickets[i].featureName
+    if (!fi) continue
+    for (let j = i + 1; j < n; j++) {
+      if (tickets[j].featureName === fi) union(i, j)
+    }
+  }
+
   // O(n²) similarity check — batched for performance
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
@@ -379,7 +388,7 @@ export async function clusterTickets(
   const cacheKey = `${tickets.length}:${aiProvider}`
   if (clusterCache.has(cacheKey)) return clusterCache.get(cacheKey)!
 
-  const threshold = 0.45
+  const threshold = 0.3
 
   // Cluster within each team independently — prevents cross-team contamination
   const teamNames = [...new Set(tickets.map(t => t.teamName ?? ''))]
