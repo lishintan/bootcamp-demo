@@ -151,22 +151,23 @@ async function aiClusterPool(
         messages: [
           {
             role: 'user',
-            content: `You are grouping ${tickets.length} product ${category.toLowerCase()} tickets by their underlying problem.
+            content: `Group these ${tickets.length} product ${category.toLowerCase()} tickets. Two tickets belong in the same group ONLY IF they describe THE SAME SPECIFIC ISSUE OR REQUEST — not just the same general topic.
 
-RULES — read carefully:
-1. Tickets about the SAME root problem MUST be in the same group, even if the wording is completely different.
-2. Be VERY aggressive. When in doubt, group them together.
-3. Examples of tickets that MUST be grouped:
-   - "Meditation stops playing" + "Meditation freezes after 5 seconds" + "Audio cuts out during meditation" → ONE group
-   - "Streak counter resets" + "Streak tracking unreliable" + "Streak shows wrong number" → ONE group
-   - "Download fails on WiFi" + "Offline content won't load" + "Downloaded videos not playing" → ONE group
-4. Only keep tickets in separate groups if they are clearly about DIFFERENT root problems.
+✅ SAME GROUP (identical root cause / identical request):
+- "Meditation audio stops after 5s" + "Audio cuts out during meditation" + "Meditation freezes mid-session" → same bug: meditation playback stopping
+- "Streak counter resets to zero" + "Streak tracking unreliable" + "My streak disappeared" → same bug: streak resetting
+- "Add offline downloads for meditations" + "Download content for offline playback" → same request: offline download
 
-Here are the ${tickets.length} tickets:
+❌ DIFFERENT GROUPS (same topic but different specific issues):
+- "Add volume control" vs "Add offline mode" → different features, keep separate
+- "Meditation freezes" vs "Quest video freezes" → different features, keep separate
+- "Login broken" vs "Password reset fails" → different problems, keep separate
+
+Here are the tickets:
 ${lines}
 
-Respond with ONLY a raw JSON array of arrays of indices. No explanation, no markdown, no code blocks.
-Example: [[0,3,7],[1,4,9],[2],[5,6,8]]`,
+Output ONLY a raw JSON array of arrays of indices. No explanation, no markdown.
+Example: [[0,3],[1,4,9],[2],[5,6]]`,
           },
         ],
       }),
