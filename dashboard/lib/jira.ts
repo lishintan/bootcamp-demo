@@ -116,7 +116,7 @@ function mapIssue(issue: JiraIssueRaw): JiraTicket {
     featureTitle: typeof f[CUSTOM_FIELDS.featureTitle] === 'string'
       ? (f[CUSTOM_FIELDS.featureTitle] as string)
       : null,
-    archived: issue.archived === true || (issue as Record<string, unknown>).archivedDate != null,
+    archived: issue.archived === true || (issue as unknown as Record<string, unknown>).archivedDate != null,
   }
 }
 
