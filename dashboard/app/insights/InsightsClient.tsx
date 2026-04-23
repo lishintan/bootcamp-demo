@@ -513,8 +513,6 @@ function InsightCard({
 
 // ─── Category Section ─────────────────────────────────────────────────────────
 
-const PAGE_SIZE = 10
-
 function CategorySection({
   title,
   groups,
@@ -533,23 +531,26 @@ function CategorySection({
   onToggleBookmark: (group: InsightGroup) => void
 }) {
   const [showAll, setShowAll] = useState(false)
-  const [page, setPage] = useState(1)
 
-  const top8 = groups.slice(0, 8)
-  const totalPages = Math.ceil(groups.length / PAGE_SIZE)
-  const paginatedGroups = groups.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const visibleGroups = showAll ? groups : groups.slice(0, 8)
 
-  const handleShowAll = () => {
-    setShowAll(true)
-    setPage(1)
+  if (groups.length === 0) {
+    if (title === 'Bugs') {
+      return (
+        <section className="space-y-4">
+          <div className="flex items-center gap-3">
+            <h2 className="text-lg font-semibold text-white">{title}</h2>
+          </div>
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-8 text-center">
+            <div className="text-3xl mb-2">🎉</div>
+            <p className="text-white font-semibold">No bugs reported!</p>
+            <p className="text-gray-400 text-sm mt-1">No active bug reports for this segment. Keep it up!</p>
+          </div>
+        </section>
+      )
+    }
+    return null
   }
-
-  const handleShowLess = () => {
-    setShowAll(false)
-    setPage(1)
-  }
-
-  if (groups.length === 0) return null
 
   return (
     <section className="space-y-4">
@@ -562,76 +563,36 @@ function CategorySection({
       </div>
 
       {/* Cards */}
-      {!showAll ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {top8.map(g => (
-            <InsightCard
-              key={g.id}
-              group={g}
-              onSelect={onSelectGroup}
-              isBookmarked={bookmarkedIds.has(g.id)}
-              isSaving={savingIds.has(g.id)}
-              onToggleBookmark={onToggleBookmark}
-            />
-          ))}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {paginatedGroups.map(g => (
-            <InsightCard
-              key={g.id}
-              group={g}
-              onSelect={onSelectGroup}
-              isBookmarked={bookmarkedIds.has(g.id)}
-              isSaving={savingIds.has(g.id)}
-              onToggleBookmark={onToggleBookmark}
-            />
-          ))}
-        </div>
-      )}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+        {visibleGroups.map(g => (
+          <InsightCard
+            key={g.id}
+            group={g}
+            onSelect={onSelectGroup}
+            isBookmarked={bookmarkedIds.has(g.id)}
+            isSaving={savingIds.has(g.id)}
+            onToggleBookmark={onToggleBookmark}
+          />
+        ))}
+      </div>
 
-      {/* Controls */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          {!showAll && groups.length > 8 && (
-            <button
-              onClick={handleShowAll}
-              className="text-sm text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1 transition-colors"
-            >
-              Show All {title} →
-            </button>
-          )}
-          {showAll && (
-            <button
-              onClick={handleShowLess}
-              className="text-sm text-gray-400 hover:text-gray-300 font-medium flex items-center gap-1 transition-colors"
-            >
-              ← Show Less
-            </button>
-          )}
-        </div>
-
-        {/* Pagination when expanded */}
-        {showAll && totalPages > 1 && (
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="px-2 py-1 text-xs rounded bg-gray-700 text-gray-300 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              ‹
-            </button>
-            <span className="text-xs text-gray-500 px-2">
-              {page} / {totalPages}
-            </span>
-            <button
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="px-2 py-1 text-xs rounded bg-gray-700 text-gray-300 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              ›
-            </button>
-          </div>
+      {/* Show All / Show Less */}
+      <div className="flex items-center gap-2">
+        {!showAll && groups.length > 8 && (
+          <button
+            onClick={() => setShowAll(true)}
+            className="text-sm text-indigo-400 hover:text-indigo-300 font-medium flex items-center gap-1 transition-colors"
+          >
+            Show All {groups.length} {title} →
+          </button>
+        )}
+        {showAll && (
+          <button
+            onClick={() => setShowAll(false)}
+            className="text-sm text-gray-400 hover:text-gray-300 font-medium flex items-center gap-1 transition-colors"
+          >
+            ← Show Less
+          </button>
         )}
       </div>
     </section>

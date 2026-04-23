@@ -67,7 +67,8 @@ function tokenise(text: string): string[] {
 
 function buildCorpus(ticket: JiraTicket): string {
   const parts: string[] = [ticket.summary]
-  if (ticket.description) parts.push(ticket.description)
+  // Truncate description to prevent long unique descriptions from drowning out summary similarity
+  if (ticket.description) parts.push(ticket.description.slice(0, 200))
   if (ticket.featureName) parts.push(ticket.featureName)
   if (ticket.featureTitle) parts.push(ticket.featureTitle)
   return parts.join(' ')

@@ -15,6 +15,7 @@ export interface JiraTicket {
   customerSegment: string[] | null // customfield_10435 (e.g., MVM Users)
   platform: string | null          // customfield_10510 (iOS/Android/Web)
   featureTitle: string | null      // customfield_11702 (Feature description string)
+  archived: boolean                // Jira native archive flag
 }
 
 // Custom field IDs discovered from the PF project
@@ -114,6 +115,7 @@ function mapIssue(issue: JiraIssueRaw): JiraTicket {
     featureTitle: typeof f[CUSTOM_FIELDS.featureTitle] === 'string'
       ? (f[CUSTOM_FIELDS.featureTitle] as string)
       : null,
+    archived: (issue as Record<string, unknown>).archived === true,
   }
 }
 
