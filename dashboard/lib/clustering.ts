@@ -23,19 +23,6 @@ export interface InsightGroup {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const ENGLISH_STOPWORDS = new Set([
-  'a', 'an', 'the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-  'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been',
-  'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
-  'could', 'should', 'may', 'might', 'shall', 'can', 'need', 'dare',
-  'ought', 'used', 'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he',
-  'she', 'it', 'they', 'them', 'their', 'this', 'that', 'these', 'those',
-  'as', 'if', 'so', 'than', 'then', 'when', 'where', 'who', 'which',
-  'not', 'no', 'nor', 'all', 'any', 'some', 'such', 'more', 'most',
-  'other', 'into', 'about', 'up', 'out', 'also', 'just', 'its', 'how',
-  'what', 'there', 'here', 'get', 'set', 'new', 'use', 'via', 'per',
-])
-
 const WHY_TAG_KEYWORDS: Record<'Friction' | 'Wishlist' | 'Retention' | 'Revenue', string[]> = {
   Friction: [
     'error', 'bug', 'broken', 'crash', 'fail', 'slow', "can't", 'cannot',
@@ -57,137 +44,7 @@ const WHY_TAG_KEYWORDS: Record<'Friction' | 'Wishlist' | 'Retention' | 'Revenue'
 
 const ENRICH_BATCH_SIZE = 20
 const ENRICH_TOP_N = 25
-// Pools larger than this fall back to TF-IDF to avoid token-limit issues
-const AI_CLUSTER_MAX = 50
-
-// ─── Text processing ─────────────────────────────────────────────────────────
-
-function tokenise(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .split(/\s+/)
-    .filter(t => t.length > 2 && !ENGLISH_STOPWORDS.has(t))
-}
-
-function buildCorpus(ticket: JiraTicket): string {
-  const parts: string[] = [ticket.summary]
-  // Truncate description to prevent long unique descriptions from drowning out summary similarity
-  if (ticket.description) parts.push(ticket.description.slice(0, 200))
-  if (ticket.featureName) parts.push(ticket.featureName)
-  if (ticket.featureTitle) parts.push(ticket.featureTitle)
-  return parts.join(' ')
-}
-
-// ─── TF-IDF ──────────────────────────────────────────────────────────────────
-
-function computeTfIdf(docs: string[][]): number[][] {
-  const N = docs.length
-  // DF: how many docs contain each term
-  const df = new Map<string, number>()
-  for (const doc of docs) {
-    const unique = new Set(doc)
-    for (const term of unique) {
-      df.set(term, (df.get(term) ?? 0) + 1)
-    }
-  }
-
-  // IDF with smoothing
-  const idf = new Map<string, number>()
-  for (const [term, count] of df) {
-    idf.set(term, Math.log((N + 1) / (count + 1)) + 1)
-  }
-
-  // Include all terms — filtering to 2+ breaks small per-team pools
-  const vocab: string[] = []
-  for (const [term] of df) {
-    vocab.push(term)
-  }
-
-  // TF-IDF vectors
-  const vectors: number[][] = docs.map(doc => {
-    const tf = new Map<string, number>()
-    for (const term of doc) {
-      tf.set(term, (tf.get(term) ?? 0) + 1)
-    }
-    const docLen = doc.length || 1
-
-    return vocab.map(term => {
-      const termTf = (tf.get(term) ?? 0) / docLen
-      const termIdf = idf.get(term) ?? 0
-      return termTf * termIdf
-    })
-  })
-
-  return vectors
-}
-
-function cosineSimilarity(a: number[], b: number[]): number {
-  let dot = 0
-  let normA = 0
-  let normB = 0
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i]
-    normA += a[i] * a[i]
-    normB += b[i] * b[i]
-  }
-  if (normA === 0 || normB === 0) return 0
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB))
-}
-
-// ─── Single-linkage clustering (TF-IDF fallback) ─────────────────────────────
-
-function singleLinkageClusters(
-  tickets: JiraTicket[],
-  vectors: number[][],
-  threshold: number,
-): number[][] {
-  const n = tickets.length
-  // Union-Find
-  const parent = Array.from({ length: n }, (_, i) => i)
-
-  function find(x: number): number {
-    while (parent[x] !== x) {
-      parent[x] = parent[parent[x]]
-      x = parent[x]
-    }
-    return x
-  }
-
-  function union(x: number, y: number) {
-    const px = find(x)
-    const py = find(y)
-    if (px !== py) parent[px] = py
-  }
-
-  // O(n²) similarity check
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      if (find(i) !== find(j)) {
-        const sim = cosineSimilarity(vectors[i], vectors[j])
-        if (sim >= threshold) {
-          union(i, j)
-        }
-      }
-    }
-  }
-
-  // Group indices by root
-  const groups = new Map<number, number[]>()
-  for (let i = 0; i < n; i++) {
-    const root = find(i)
-    if (!groups.has(root)) groups.set(root, [])
-    groups.get(root)!.push(i)
-  }
-
-  return Array.from(groups.values())
-}
-
-function tfidfClusters(tickets: JiraTicket[], threshold: number): number[][] {
-  const docs = tickets.map(t => tokenise(buildCorpus(t)))
-  const vectors = computeTfIdf(docs)
-  return singleLinkageClusters(tickets, vectors, threshold)
-}
+const AI_BATCH_SIZE = 50  // max tickets per AI clustering call
 
 // ─── AI semantic clustering ───────────────────────────────────────────────────
 
@@ -202,20 +59,18 @@ function normaliseClusterResult(parsed: number[][], n: number): number[][] {
     for (const idx of valid) seen.add(idx)
     if (valid.length > 0) result.push(valid)
   }
-  // Any index not returned by the model becomes its own singleton
   for (let i = 0; i < n; i++) {
     if (!seen.has(i)) result.push([i])
   }
   return result
 }
 
-async function aiClusterPool(
+async function aiClusterSingle(
   tickets: JiraTicket[],
   category: 'Bug' | 'Feedback',
   apiKey: string,
 ): Promise<number[][]> {
   if (tickets.length <= 1) return tickets.map((_, i) => [i])
-  if (tickets.length > AI_CLUSTER_MAX) return tfidfClusters(tickets, 0.4)
 
   const lines = tickets.map((t, i) => {
     const desc = t.description?.trim().slice(0, 120) ?? ''
@@ -232,31 +87,80 @@ async function aiClusterPool(
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: tickets.length * 25 + 200,
+        max_tokens: Math.min(tickets.length * 30 + 500, 8192),
         messages: [{
           role: 'user',
-          content: `Group these ${tickets.length} product ${category.toLowerCase()} tickets by semantic meaning. Tickets describing the same underlying problem or request — even if worded differently — should be in the same group. Only group tickets with at least 50% similarity in meaning. When in doubt, keep tickets separate.
+          content: `Group these ${tickets.length} product ${category.toLowerCase()} tickets by semantic meaning. Tickets about the same underlying problem or request — even if worded differently — MUST be in the same group. Be aggressive: if two tickets share the same root cause or theme, group them together.
 
 ${lines}
 
-Return ONLY a JSON array of arrays. Each inner array = one group (ticket indices). Ungrouped tickets each get their own single-item array.
+Return ONLY a JSON array of arrays. Each inner array = one group (ticket indices). Every ticket must appear exactly once.
 Format: [[0,3],[1],[2,4,7],[5],[6]]`,
         }],
       }),
     })
 
-    if (!resp.ok) return tfidfClusters(tickets, 0.4)
+    if (!resp.ok) return tickets.map((_, i) => [i])
 
     const data = await resp.json() as { content: { type: string; text: string }[] }
     const text = data.content?.[0]?.text ?? ''
     const match = text.match(/\[[\s\S]*\]/)
-    if (!match) return tfidfClusters(tickets, 0.4)
+    if (!match) return tickets.map((_, i) => [i])
 
     const parsed = JSON.parse(match[0]) as number[][]
     return normaliseClusterResult(parsed, tickets.length)
   } catch {
-    return tfidfClusters(tickets, 0.4)
+    return tickets.map((_, i) => [i])
   }
+}
+
+async function aiClusterLargePool(
+  tickets: JiraTicket[],
+  category: 'Bug' | 'Feedback',
+  apiKey: string,
+): Promise<number[][]> {
+  // Step 1: cluster within batches of AI_BATCH_SIZE
+  const batches: JiraTicket[][] = []
+  for (let i = 0; i < tickets.length; i += AI_BATCH_SIZE) {
+    batches.push(tickets.slice(i, i + AI_BATCH_SIZE))
+  }
+
+  const batchResults = await Promise.all(
+    batches.map(batch => aiClusterSingle(batch, category, apiKey)),
+  )
+
+  // Map each within-batch group back to original indices and pick a representative
+  type Cluster = { originalIndices: number[]; representative: JiraTicket }
+  const clusters: Cluster[] = []
+  batches.forEach((batch, batchIdx) => {
+    const offset = batchIdx * AI_BATCH_SIZE
+    for (const group of batchResults[batchIdx]) {
+      clusters.push({
+        originalIndices: group.map(i => offset + i),
+        representative: batch[group[0]],
+      })
+    }
+  })
+
+  if (clusters.length <= 1) return clusters.map(c => c.originalIndices)
+
+  // Step 2: merge clusters across batches by clustering their representatives
+  const repTickets = clusters.map(c => c.representative)
+  const mergeGroups = await aiClusterSingle(repTickets, category, apiKey)
+
+  return mergeGroups.map(repIndices =>
+    repIndices.flatMap(ri => clusters[ri].originalIndices),
+  )
+}
+
+async function aiClusterPool(
+  tickets: JiraTicket[],
+  category: 'Bug' | 'Feedback',
+  apiKey: string,
+): Promise<number[][]> {
+  if (tickets.length <= 1) return tickets.map((_, i) => [i])
+  if (tickets.length > AI_BATCH_SIZE) return aiClusterLargePool(tickets, category, apiKey)
+  return aiClusterSingle(tickets, category, apiKey)
 }
 
 // ─── Hook generation ─────────────────────────────────────────────────────────
@@ -273,7 +177,6 @@ function cleanText(text: string): string {
 }
 
 function generateHook(group: JiraTicket[]): string {
-  // Pick the ticket with the richest description (prefer higher impact score as tiebreak)
   const withDesc = group
     .filter(t => {
       const d = t.description?.trim() ?? ''
@@ -288,7 +191,6 @@ function generateHook(group: JiraTicket[]): string {
 
   if (bestDesc) {
     const cleaned = cleanText(bestDesc)
-    // Take up to 3 sentences for meaningful context
     const sentences = cleaned
       .split(/(?<=[.!?])\s+/)
       .map(s => s.trim())
@@ -298,7 +200,6 @@ function generateHook(group: JiraTicket[]): string {
     if (excerpt.length > 0) return excerpt
   }
 
-  // Fallback: use the best summary from the group
   const bestSummary = group
     .sort((a, b) => (b.impactScore ?? 0) - (a.impactScore ?? 0))[0]
     .summary
@@ -361,14 +262,12 @@ function computeTemperatures(rawGroups: {
 
   const freqNorm = normalise(rawGroups.map(g => g.frequency))
   const impactNorm = normalise(rawGroups.map(g => g.impactScore))
-  // Recency: fewer days since = higher score. Invert by normalising negated days.
   const recencyNorm = normalise(rawGroups.map(g => -g.recencyDays))
 
   const scores = rawGroups.map((_, i) => {
     return freqNorm[i] * 0.4 + impactNorm[i] * 0.3 + recencyNorm[i] * 0.3
   })
 
-  // Sort indices by score to compute percentile-based tiers
   const sorted = [...scores].sort((a, b) => a - b)
   const p30 = sorted[Math.floor(sorted.length * 0.29)]
   const p70 = sorted[Math.floor(sorted.length * 0.69)]
@@ -432,7 +331,6 @@ async function enrichWithAI(groups: InsightGroup[]): Promise<InsightGroup[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) return groups
 
-  // Only enrich top N groups — rest keep fallback titles
   const toEnrich = groups.slice(0, ENRICH_TOP_N)
   const rest = groups.slice(ENRICH_TOP_N)
 
@@ -450,37 +348,30 @@ async function enrichWithAI(groups: InsightGroup[]): Promise<InsightGroup[]> {
 async function clusterPool(
   tickets: JiraTicket[],
   category: 'Bug' | 'Feedback',
-  threshold: number,
-  apiKey?: string,
+  apiKey: string,
 ): Promise<Omit<InsightGroup, 'temperatureScore' | 'temperature'>[]> {
   if (tickets.length === 0) return []
 
-  const clusterIndices = apiKey
-    ? await aiClusterPool(tickets, category, apiKey)
-    : tfidfClusters(tickets, threshold)
+  const clusterIndices = await aiClusterPool(tickets, category, apiKey)
 
   const today = new Date()
 
   return clusterIndices.map(indices => {
     const groupTickets = indices.map(i => tickets[i])
 
-    // Sort by created ascending — earliest is representative
     groupTickets.sort(
       (a, b) => new Date(a.created).getTime() - new Date(b.created).getTime(),
     )
     const rep = groupTickets[0]
 
-    // Recency: most recently created ticket
     const mostRecent = groupTickets.reduce((best, t) =>
       new Date(t.created) > new Date(best.created) ? t : best,
     )
 
-    // Sources: unique labels across all tickets
     const sources = [
       ...new Set(groupTickets.flatMap(t => t.labels)),
     ].filter(Boolean)
 
-    // Average impact score (skip nulls)
     const impactScores = groupTickets
       .map(t => t.impactScore)
       .filter((s): s is number => s !== null)
@@ -492,7 +383,7 @@ async function clusterPool(
     const hook = generateHook(groupTickets)
     const whyTag = classifyWhyTag(groupTickets)
 
-    void today // suppress unused-variable lint
+    void today
 
     return {
       id: rep.key,
@@ -505,7 +396,6 @@ async function clusterPool(
       sources,
       impactScore: Math.round(avgImpact * 100) / 100,
       recency: mostRecent.created,
-      // temperature filled in after global scoring pass
       temperature: 'Cold' as const,
       temperatureScore: 0,
       hook,
@@ -524,17 +414,34 @@ export async function clusterTickets(
   tickets: JiraTicket[],
   aiProvider: string = 'none',
 ): Promise<InsightGroup[]> {
-  // Cache key: count + category breakdown (cheap hash)
   const cacheKey = `${tickets.length}:${aiProvider}`
   if (clusterCache.has(cacheKey)) return clusterCache.get(cacheKey)!
 
-  const threshold = 0.4  // fallback TF-IDF threshold when no API key
-  const apiKey = aiProvider !== 'none' ? process.env.ANTHROPIC_API_KEY : undefined
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) {
+    console.warn('[clustering] No ANTHROPIC_API_KEY — returning ungrouped tickets')
+    return tickets.map(t => ({
+      id: t.key,
+      representativeTicket: t,
+      tickets: [t],
+      frequency: 1,
+      category: (t.category as 'Bug' | 'Feedback') ?? 'Feedback',
+      teamName: t.teamName ?? '',
+      featureName: t.featureName ?? '',
+      sources: t.labels ?? [],
+      impactScore: t.impactScore ?? 0,
+      recency: t.created,
+      temperature: 'Cold' as const,
+      temperatureScore: 0,
+      hook: t.summary,
+      title: t.summary,
+      aiSummary: '',
+      whyTag: 'Friction' as const,
+    }))
+  }
 
-  // Cluster within each team independently — prevents cross-team contamination
   const teamNames = [...new Set(tickets.map(t => t.teamName ?? ''))]
 
-  // Build per-team, per-category pool tasks
   type PoolFn = () => Promise<Omit<InsightGroup, 'temperatureScore' | 'temperature'>[]>
   const tasks: PoolFn[] = teamNames.flatMap(team => {
     const teamTickets = tickets.filter(t => (t.teamName ?? '') === team)
@@ -544,13 +451,12 @@ export async function clusterTickets(
       t => t.category !== 'Bug' && t.category !== 'Feedback',
     )
     return [
-      () => clusterPool(bugs, 'Bug', threshold, apiKey),
-      () => clusterPool(feedback, 'Feedback', threshold, apiKey),
-      () => clusterPool(uncategorised, 'Feedback', threshold, apiKey),
+      () => clusterPool(bugs, 'Bug', apiKey),
+      () => clusterPool(feedback, 'Feedback', apiKey),
+      () => clusterPool(uncategorised, 'Feedback', apiKey),
     ]
   })
 
-  // Run pools with limited concurrency to avoid API rate limits
   const CONCURRENCY = 8
   const poolResults: Omit<InsightGroup, 'temperatureScore' | 'temperature'>[][] = []
   for (let i = 0; i < tasks.length; i += CONCURRENCY) {
@@ -561,7 +467,6 @@ export async function clusterTickets(
 
   const allGroups = poolResults.flat()
 
-  // Compute temperatures across all groups
   const now = Date.now()
   const rawTemps = allGroups.map(g => ({
     frequency: g.frequency,
@@ -577,12 +482,9 @@ export async function clusterTickets(
     temperature: temps[i].temperature,
   }))
 
-  // Sort by temperatureScore descending
   result.sort((a, b) => b.temperatureScore - a.temperatureScore)
 
-  const finalResult = aiProvider !== 'none'
-    ? await enrichWithAI(result)
-    : result
+  const finalResult = await enrichWithAI(result)
 
   clusterCache.set(cacheKey, finalResult)
   return finalResult
