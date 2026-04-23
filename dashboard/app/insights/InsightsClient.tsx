@@ -543,8 +543,8 @@ function CategorySection({
           </div>
           <div className="bg-gray-800 border border-gray-700 rounded-xl p-8 text-center">
             <div className="text-3xl mb-2">🎉</div>
-            <p className="text-white font-semibold">No bugs reported!</p>
-            <p className="text-gray-400 text-sm mt-1">No active bug reports for this segment. Keep it up!</p>
+            <p className="text-white font-semibold">All Bugs Escalated or Resolved!</p>
+            <p className="text-gray-400 text-sm mt-1">No open bug reports for this segment.</p>
           </div>
         </section>
       )
