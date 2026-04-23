@@ -16,6 +16,8 @@ export interface InsightGroup {
   temperature: 'Hot' | 'Medium' | 'Cold'
   temperatureScore: number       // 0–100
   hook: string                   // 1-sentence summary
+  title: string                  // AI-generated 6-10 word headline
+  aiSummary: string              // AI-generated 2-sentence summary
   whyTag: 'Friction' | 'Delight' | 'Retention' | 'Revenue'
 }
 
@@ -298,14 +300,64 @@ function computeTemperatures(rawGroups: {
   })
 }
 
+// ─── AI enrichment ────────────────────────────────────────────────────────────
+
+async function enrichWithAI(groups: InsightGroup[]): Promise<InsightGroup[]> {
+  const apiKey = process.env.ANTHROPIC_API_KEY
+  if (!apiKey) return groups
+
+  const enriched = await Promise.all(groups.map(async (group) => {
+    try {
+      const ticketLines = group.tickets
+        .slice(0, 15)
+        .map(t => `- ${t.summary}`)
+        .join('\n')
+
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 200,
+          messages: [{
+            role: 'user',
+            content: `You analyze product feedback for a product intelligence dashboard. Team: ${group.teamName}. Category: ${group.category}. ${group.tickets.length} user reports:\n${ticketLines}\n\nGenerate:\n1. Title: 6-10 word headline naming the specific problem (not generic)\n2. Summary: 2 sentences. Sentence 1: what users are experiencing. Sentence 2: the business/user impact.\n\nJSON only: {"title": "...", "summary": "..."}`,
+          }],
+        }),
+      })
+
+      if (!resp.ok) return group
+
+      const data = await resp.json() as { content: { type: string; text: string }[] }
+      const text = data.content?.[0]?.text ?? ''
+      const match = text.match(/\{[\s\S]*?\}/)
+      const parsed = JSON.parse(match?.[0] ?? '{}') as { title?: string; summary?: string }
+
+      return {
+        ...group,
+        title: parsed.title?.trim() || group.title,
+        aiSummary: parsed.summary?.trim() || group.aiSummary,
+      }
+    } catch {
+      return group
+    }
+  }))
+
+  return enriched
+}
+
 // ─── Main clustering function ─────────────────────────────────────────────────
 
 const clusterCache = new Map<string, InsightGroup[]>()
 
-export function clusterTickets(
+export async function clusterTickets(
   tickets: JiraTicket[],
   aiProvider: string = 'none',
-): InsightGroup[] {
+): Promise<InsightGroup[]> {
   // Cache key: count + category breakdown (cheap hash)
   const cacheKey = `${tickets.length}:${aiProvider}`
   if (clusterCache.has(cacheKey)) return clusterCache.get(cacheKey)!
@@ -348,8 +400,12 @@ export function clusterTickets(
   // Sort by temperatureScore descending
   result.sort((a, b) => b.temperatureScore - a.temperatureScore)
 
-  clusterCache.set(cacheKey, result)
-  return result
+  const finalResult = aiProvider !== 'none'
+    ? await enrichWithAI(result)
+    : result
+
+  clusterCache.set(cacheKey, finalResult)
+  return finalResult
 }
 
 function clusterPool(
@@ -418,6 +474,8 @@ function clusterPool(
       temperature: 'Cold' as const,
       temperatureScore: 0,
       hook,
+      title: groupTickets[0]?.summary?.slice(0, 80) ?? '',
+      aiSummary: '',
       whyTag,
     }
   })

@@ -85,59 +85,6 @@ interface Bookmark {
   status: 'open' | 'archived'
 }
 
-// ─── Narrative generation (AI_PROVIDER=none fallback) ────────────────────────
-
-function generateNarrative(group: InsightGroup): {
-  problem: string
-  likelyCause: string
-  impact: string
-} {
-  const aiProvider = 'none' // swap for process.env.NEXT_PUBLIC_AI_PROVIDER when available
-
-  if (aiProvider !== 'none') {
-    // When AI is available, this would be replaced with a real Claude/Gemini call
-    // that generates the same three paragraphs from the grouped ticket texts.
-    // The conditional below is left as a hook for that future implementation.
-    return { problem: '', likelyCause: '', impact: '' }
-  }
-
-  // ── AI_PROVIDER=none: template-based narrative ──
-  const rep = group.representativeTicket
-  const descSentences = rep.description
-    ? rep.description.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0).slice(0, 2)
-    : []
-  const problemText =
-    descSentences.length > 0
-      ? `${rep.summary}. ${descSentences.join(' ')}`
-      : rep.summary
-
-  const causeMap: Record<InsightGroup['whyTag'], string> = {
-    Friction:
-      'This appears to be a usability or reliability issue based on user reports.',
-    Delight:
-      'Users are requesting additional functionality or improvements.',
-    Retention:
-      'Users are expressing dissatisfaction that may lead to churn.',
-    Revenue:
-      'Users have concerns about pricing or subscription value.',
-  }
-
-  const impactMap: Record<InsightGroup['temperature'], string> = {
-    Hot:
-      'High urgency: this affects many users and is frequently reported.',
-    Medium:
-      'Moderate urgency: worth addressing in the next planning cycle.',
-    Cold:
-      'Lower priority: relatively few reports or low impact score.',
-  }
-
-  return {
-    problem: problemText,
-    likelyCause: causeMap[group.whyTag],
-    impact: impactMap[group.temperature],
-  }
-}
-
 // ─── Badge components ─────────────────────────────────────────────────────────
 
 function TemperatureBadge({
@@ -250,7 +197,6 @@ function DetailPanel({
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
   const [showAllTickets, setShowAllTickets] = useState(false)
-  const narrative = generateNarrative(group)
 
   // Escape key handler
   useEffect(() => {
@@ -344,9 +290,9 @@ function DetailPanel({
                   <TemperatureBadge temperature={group.temperature} score={group.temperatureScore} />
                   <WhyTagBadge tag={group.whyTag} />
                 </div>
-                {/* Hook as title */}
+                {/* Title */}
                 <h2 className="text-base font-semibold text-white leading-snug">
-                  {group.hook}
+                  {group.title || group.hook}
                 </h2>
               </div>
               {/* Action buttons */}
@@ -374,23 +320,12 @@ function DetailPanel({
             {/* Divider */}
             <div className="border-t border-gray-700" />
 
-            {/* Narrative */}
-            <section aria-label="AI-generated narrative" className="space-y-3">
-              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Narrative</h3>
-              <div className="space-y-3 text-sm text-gray-300 leading-relaxed">
-                <p>
-                  <span className="font-semibold text-white">Problem: </span>
-                  {narrative.problem}
-                </p>
-                <p>
-                  <span className="font-semibold text-white">Likely Cause: </span>
-                  {narrative.likelyCause}
-                </p>
-                <p>
-                  <span className="font-semibold text-white">Impact: </span>
-                  {narrative.impact}
-                </p>
-              </div>
+            {/* AI Summary */}
+            <section aria-label="AI-generated summary" className="space-y-3">
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Insight</h3>
+              <p className="text-sm text-gray-300 leading-relaxed">
+                {group.aiSummary || group.hook}
+              </p>
             </section>
 
             {/* Divider */}
@@ -416,21 +351,6 @@ function DetailPanel({
                 </div>
               </div>
             </section>
-
-            {/* AI Summary (only if frequency >= 50) */}
-            {group.frequency >= 50 && (
-              <>
-                <div className="border-t border-gray-700" />
-                <section aria-label="AI summary" className="space-y-3">
-                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">AI Summary</h3>
-                  <div className="bg-indigo-950/40 border border-indigo-800/60 rounded-xl p-4">
-                    <p className="text-sm text-indigo-300 leading-relaxed">
-                      AI Summary available when AI provider is configured. This group has {group.frequency} reports.
-                    </p>
-                  </div>
-                </section>
-              </>
-            )}
 
             {/* Divider */}
             <div className="border-t border-gray-700" />
@@ -525,16 +445,13 @@ function InsightCard({
   isSaving: boolean
   onToggleBookmark: (group: InsightGroup) => void
 }) {
-  const truncatedHook = group.hook.length > 200
-    ? group.hook.substring(0, 197) + '...'
-    : group.hook
   const primarySource = group.sources[0] ?? null
 
   return (
     <div
       role="button"
       tabIndex={0}
-      aria-label={`View details for insight: ${group.hook}`}
+      aria-label={`View details for insight: ${group.title || group.representativeTicket.summary}`}
       onClick={() => onSelect(group)}
       onKeyDown={e => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -560,8 +477,13 @@ function InsightCard({
         {primarySource && <SourceBadge source={primarySource} />}
       </div>
 
-      {/* Hook */}
-      <p className="text-sm text-white font-medium leading-snug">{truncatedHook}</p>
+      {/* Title */}
+      <h3 className="text-sm font-semibold text-white leading-snug">{group.title || group.representativeTicket.summary}</h3>
+
+      {/* AI Summary */}
+      {group.aiSummary && (
+        <p className="text-xs text-gray-400 leading-relaxed line-clamp-3">{group.aiSummary}</p>
+      )}
 
       {/* Frequency */}
       <div className="text-xs text-gray-400">
