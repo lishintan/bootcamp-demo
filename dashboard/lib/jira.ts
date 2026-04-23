@@ -125,7 +125,7 @@ function mapIssue(issue: JiraIssueRaw): JiraTicket {
 
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
-const REDIS_CACHE_KEY = 'pid-jira-tickets-v6'
+const REDIS_CACHE_KEY = 'pid-jira-tickets-v7'
 const CACHE_TTL_SECONDS = 60 * 60 // 1 hour
 
 // In-memory fallback for when Redis is unavailable
@@ -196,7 +196,7 @@ export async function fetchJiraTickets(): Promise<{ tickets: JiraTicket[]; total
   // Fetch archived issue keys in parallel — used to mark tickets; safe fallback if JQL unsupported
   const [archivedKeys] = await Promise.all([fetchArchivedKeys(baseUrl, auth)])
 
-  const jql = `project=PF AND status in ("Parking Lot","Won't Do") ORDER BY created DESC`
+  const jql = `project=PF AND status in ("Parking Lot","Won't Do") AND created >= "2026-01-01" ORDER BY created DESC`
 
   const allTickets: JiraTicket[] = []
   let nextPageToken: string | undefined

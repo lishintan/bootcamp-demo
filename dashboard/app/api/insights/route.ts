@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
-const CLUSTER_CACHE_KEY = 'pid-clusters-v12'
+const CLUSTER_CACHE_KEY = 'pid-clusters-v13'
 const CLUSTER_CACHE_TTL = 3600
 
 interface CachedPayload {
