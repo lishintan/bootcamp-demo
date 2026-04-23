@@ -93,10 +93,10 @@ function computeTfIdf(docs: string[][]): number[][] {
     idf.set(term, Math.log((N + 1) / (count + 1)) + 1)
   }
 
-  // Build vocabulary (only terms that appear in at least 2 docs, for speed)
+  // Include all terms — filtering to 2+ breaks small per-team pools (most terms appear once)
   const vocab: string[] = []
-  for (const [term, count] of df) {
-    if (count >= 2) vocab.push(term)
+  for (const [term] of df) {
+    vocab.push(term)
   }
 
   // TF-IDF vectors

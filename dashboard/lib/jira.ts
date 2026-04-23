@@ -125,7 +125,7 @@ function mapIssue(issue: JiraIssueRaw): JiraTicket {
 
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
-const REDIS_CACHE_KEY = 'pid-jira-tickets-v7'
+const REDIS_CACHE_KEY = 'pid-jira-tickets-v8'
 const CACHE_TTL_SECONDS = 60 * 60 // 1 hour
 
 // In-memory fallback for when Redis is unavailable
