@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
-const CLUSTER_CACHE_KEY = 'pid-clusters-v3'
+const CLUSTER_CACHE_KEY = 'pid-clusters-v4'
 const CLUSTER_CACHE_TTL = 3600
 
 interface CachedPayload {
@@ -46,6 +46,14 @@ async function writeClusterCache(data: CachedPayload): Promise<void> {
   } catch {
     // non-fatal
   }
+}
+
+function slimForCache(groups: InsightGroup[]): InsightGroup[] {
+  return groups.map(g => ({
+    ...g,
+    representativeTicket: { ...g.representativeTicket, description: null },
+    tickets: g.tickets.map(t => ({ ...t, description: null })),
+  }))
 }
 
 function applyFilters(
@@ -91,7 +99,7 @@ export async function GET(req: NextRequest) {
     const aiProvider = process.env.ANTHROPIC_API_KEY ? 'claude' : 'none'
     const allGroups = await clusterTickets(tickets, aiProvider)
 
-    await writeClusterCache({ groups: allGroups, total, parkingLot, wontDo })
+    await writeClusterCache({ groups: slimForCache(allGroups), total, parkingLot, wontDo })
 
     const groups = applyFilters(allGroups, statusFilter, teamFilter, categoryFilter)
     return Response.json({ groups, total, parkingLot, wontDo })
