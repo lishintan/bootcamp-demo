@@ -151,9 +151,10 @@ async function aiClusterPool(
         messages: [
           {
             role: 'user',
-            content: `Group these ${tickets.length} product ${category === 'Bug' ? 'bug' : 'feedback'} tickets by specific root cause.
+            content: `Group these ${tickets.length} product ${category === 'Bug' ? 'bug' : 'feedback'} tickets by user-facing problem. Two tickets belong in the same group if a user would describe them as the same issue — even if the technical details differ.
 
-Only group tickets that describe THE EXACT SAME specific problem or request. If two tickets are about different problems (even in the same feature), they must be separate groups.
+For bugs: "streak not credited", "streak resets", "sessions not registering affecting streak" are ALL the same user problem → one group.
+For feedback: "add dark mode" and "app needs dark theme" are the same request → one group. But "add dark mode" and "improve navigation" are different → separate groups.
 
 ${lines}
 
@@ -271,8 +272,11 @@ function computeTemperatures(rawGroups: { frequency: number; impactScore: number
 
 async function enrichBatch(batch: InsightGroup[], apiKey: string): Promise<InsightGroup[]> {
   const batchContent = batch.map((g, i) => {
-    const lines = g.tickets.slice(0, 8).map(t => `- ${t.summary}`).join('\n')
-    return `[${i + 1}] ${g.category} · ${g.teamName} · ${g.tickets.length} reports:\n${lines}`
+    const lines = g.tickets.slice(0, 5).map(t => {
+      const desc = t.description?.trim().slice(0, 300) ?? ''
+      return `  - ${t.summary}${desc ? '\n    "${desc}"' : ''}`
+    }).join('\n')
+    return `[${i + 1}] ${g.featureName} · ${g.category} · ${g.tickets.length} reports:\n${lines}`
   }).join('\n\n')
 
   try {
@@ -281,10 +285,17 @@ async function enrichBatch(batch: InsightGroup[], apiKey: string): Promise<Insig
       headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 300 * batch.length,
+        max_tokens: 400 * batch.length,
         messages: [{
           role: 'user',
-          content: `Analyze these ${batch.length} product feedback groups. For each group numbered [1]–[${batch.length}], generate a title (6-10 words, specific) and summary (2 sentences: what users experience + business impact).\n\n${batchContent}\n\nReturn a JSON array of exactly ${batch.length} objects:\n[{"title":"...","summary":"..."}, ...]`,
+          content: `You are a product analyst writing insight cards for a PM dashboard. For each of the ${batch.length} groups below, write:
+- title: 6-10 words, clear and specific (e.g. "Streak counter resets after completing daily activities")
+- summary: 2 sentences. First: what users are experiencing (use the actual feedback). Second: why this matters to the business.
+
+${batchContent}
+
+Return a JSON array of exactly ${batch.length} objects:
+[{"title":"...","summary":"..."}, ...]`,
         }],
       }),
     })
