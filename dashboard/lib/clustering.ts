@@ -18,7 +18,7 @@ export interface InsightGroup {
   hook: string                   // 1-sentence summary
   title: string                  // AI-generated 6-10 word headline
   aiSummary: string              // AI-generated 2-sentence summary
-  whyTag: 'Friction' | 'Delight' | 'Retention' | 'Revenue'
+  whyTag: 'Friction' | 'Wishlist' | 'Retention' | 'Revenue'
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -36,12 +36,12 @@ const ENGLISH_STOPWORDS = new Set([
   'what', 'there', 'here', 'get', 'set', 'new', 'use', 'via', 'per',
 ])
 
-const WHY_TAG_KEYWORDS: Record<'Friction' | 'Delight' | 'Retention' | 'Revenue', string[]> = {
+const WHY_TAG_KEYWORDS: Record<'Friction' | 'Wishlist' | 'Retention' | 'Revenue', string[]> = {
   Friction: [
     'error', 'bug', 'broken', 'crash', 'fail', 'slow', "can't", 'cannot',
     "doesn't work", 'issue', 'problem', 'confusing', 'unclear', 'hard to', 'difficult',
   ],
-  Delight: [
+  Wishlist: [
     'love', 'great', 'amazing', 'excellent', 'wish', 'would love', 'want',
     'feature request', 'add', 'improve', 'enhance', 'better',
   ],
@@ -228,7 +228,7 @@ function generateHook(group: JiraTicket[]): string {
 
 function classifyWhyTag(
   tickets: JiraTicket[],
-): 'Friction' | 'Delight' | 'Retention' | 'Revenue' {
+): 'Friction' | 'Wishlist' | 'Retention' | 'Revenue' {
   const combinedText = tickets
     .map(t => [t.summary, t.description ?? ''].join(' '))
     .join(' ')
@@ -255,7 +255,7 @@ function classifyWhyTag(
     scores[a] >= scores[b] ? a : b,
   )
   return (scores[best] > 0 ? best : 'Friction') as
-    'Friction' | 'Delight' | 'Retention' | 'Revenue'
+    'Friction' | 'Wishlist' | 'Retention' | 'Revenue'
 }
 
 // ─── Temperature calculation ─────────────────────────────────────────────────

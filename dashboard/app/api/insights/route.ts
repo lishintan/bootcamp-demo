@@ -100,12 +100,20 @@ export async function GET(req: NextRequest) {
       return Response.json({ groups: fromCache, total, parkingLot, wontDo })
     }
 
-    groups = await clusterTickets(filtered, aiProvider)
+    // Cluster ALL tickets (both statuses) so cache covers both tabs
+    const allGroups = await clusterTickets(tickets, aiProvider)
+    await writeClusterCache(allGroups)
 
-    // Write full result to cluster Redis cache
-    await writeClusterCache(groups)
-
-    // Apply category filter after clustering (clusters are already per-category)
+    // Apply filters for this request
+    groups = allGroups
+    if (statusFilter === 'parking_lot') {
+      groups = groups.filter(g => g.tickets.some(t => t.status.toLowerCase() === 'parking lot'))
+    } else if (statusFilter === 'wont_do') {
+      groups = groups.filter(g => g.tickets.some(t => t.status.toLowerCase() === "won't do"))
+    }
+    if (teamFilter) {
+      groups = groups.filter(g => g.teamName?.toLowerCase() === teamFilter.toLowerCase())
+    }
     if (categoryFilter === 'Bug' || categoryFilter === 'Feedback') {
       groups = groups.filter(g => g.category === categoryFilter)
     }

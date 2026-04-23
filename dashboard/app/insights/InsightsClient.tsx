@@ -111,7 +111,7 @@ function TemperatureBadge({
 function WhyTagBadge({ tag }: { tag: InsightGroup['whyTag'] }) {
   const styles = {
     Friction: 'bg-red-900/50 text-red-300',
-    Delight: 'bg-green-900/50 text-green-300',
+    Wishlist: 'bg-green-900/50 text-green-300',
     Retention: 'bg-orange-900/50 text-orange-300',
     Revenue: 'bg-purple-900/50 text-purple-300',
   }
@@ -445,7 +445,7 @@ function InsightCard({
   isSaving: boolean
   onToggleBookmark: (group: InsightGroup) => void
 }) {
-  const primarySource = group.sources[0] ?? null
+
 
   return (
     <div
@@ -474,7 +474,7 @@ function InsightCard({
       <div className="flex flex-wrap gap-1.5 pr-6">
         <TemperatureBadge temperature={group.temperature} score={group.temperatureScore} />
         <WhyTagBadge tag={group.whyTag} />
-        {primarySource && <SourceBadge source={primarySource} />}
+        {group.sources.map(s => <SourceBadge key={s} source={s} />)}
       </div>
 
       {/* Title */}
@@ -482,7 +482,7 @@ function InsightCard({
 
       {/* AI Summary */}
       {group.aiSummary && (
-        <p className="text-xs text-gray-400 leading-relaxed line-clamp-3">{group.aiSummary}</p>
+        <p className="text-xs text-gray-400 leading-relaxed">{group.aiSummary}</p>
       )}
 
       {/* Frequency */}
@@ -815,7 +815,7 @@ function BookmarkedInsightsSection({
             >
               <div className="flex-1 min-w-0 space-y-1">
                 <p className="text-sm text-white font-medium leading-snug line-clamp-2">
-                  {bm.insightHook}
+                  {matchedGroup?.title || bm.insightHook}
                 </p>
                 <div className="flex flex-wrap gap-2 items-center">
                   <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${
