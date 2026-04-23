@@ -151,23 +151,14 @@ async function aiClusterPool(
         messages: [
           {
             role: 'user',
-            content: `Group these ${tickets.length} product ${category.toLowerCase()} tickets. Two tickets belong in the same group ONLY IF they describe THE SAME SPECIFIC ISSUE OR REQUEST — not just the same general topic.
+            content: `Group these ${tickets.length} product ${category === 'Bug' ? 'bug' : 'feedback'} tickets by specific root cause.
 
-✅ SAME GROUP (identical root cause / identical request):
-- "Meditation audio stops after 5s" + "Audio cuts out during meditation" + "Meditation freezes mid-session" → same bug: meditation playback stopping
-- "Streak counter resets to zero" + "Streak tracking unreliable" + "My streak disappeared" → same bug: streak resetting
-- "Add offline downloads for meditations" + "Download content for offline playback" → same request: offline download
+Only group tickets that describe THE EXACT SAME specific problem or request. If two tickets are about different problems (even in the same feature), they must be separate groups.
 
-❌ DIFFERENT GROUPS (same topic but different specific issues):
-- "Add volume control" vs "Add offline mode" → different features, keep separate
-- "Meditation freezes" vs "Quest video freezes" → different features, keep separate
-- "Login broken" vs "Password reset fails" → different problems, keep separate
-
-Here are the tickets:
 ${lines}
 
-Output ONLY a raw JSON array of arrays of indices. No explanation, no markdown.
-Example: [[0,3],[1,4,9],[2],[5,6]]`,
+Output ONLY a JSON array of arrays of indices. No explanation, no markdown.
+Example: [[0,3],[1,4],[2],[5,6]]`,
           },
         ],
       }),
@@ -388,15 +379,20 @@ export async function clusterTickets(
   type PoolFn = () => Promise<Omit<InsightGroup, 'temperatureScore' | 'temperature'>[]>
   const tasks: PoolFn[] = teamNames.flatMap(team => {
     const teamTickets = tickets.filter(t => (t.teamName ?? '') === team)
-    const bugs = teamTickets.filter(t => t.category === 'Bug')
-    const feedback = teamTickets.filter(t => t.category === 'Feedback')
-    const uncategorised = teamTickets.filter(t => t.category !== 'Bug' && t.category !== 'Feedback')
+    // Split by feature so each pool is focused — prevents cross-feature over-grouping
+    const featureNames = [...new Set(teamTickets.map(t => t.featureName ?? ''))]
     const key = apiKey ?? ''
-    return [
-      () => key ? clusterPool(bugs, 'Bug', key) : Promise.resolve(bugs.map(t => ticketToSingleton(t))),
-      () => key ? clusterPool(feedback, 'Feedback', key) : Promise.resolve(feedback.map(t => ticketToSingleton(t))),
-      () => key ? clusterPool(uncategorised, 'Feedback', key) : Promise.resolve(uncategorised.map(t => ticketToSingleton(t))),
-    ]
+    return featureNames.flatMap(feature => {
+      const featureTickets = teamTickets.filter(t => (t.featureName ?? '') === feature)
+      const bugs = featureTickets.filter(t => t.category === 'Bug')
+      const feedback = featureTickets.filter(t => t.category === 'Feedback')
+      const uncategorised = featureTickets.filter(t => t.category !== 'Bug' && t.category !== 'Feedback')
+      return [
+        () => key ? clusterPool(bugs, 'Bug', key) : Promise.resolve(bugs.map(ticketToSingleton)),
+        () => key ? clusterPool(feedback, 'Feedback', key) : Promise.resolve(feedback.map(ticketToSingleton)),
+        () => key ? clusterPool(uncategorised, 'Feedback', key) : Promise.resolve(uncategorised.map(ticketToSingleton)),
+      ]
+    })
   })
 
   const CONCURRENCY = 8
