@@ -43,7 +43,7 @@ const WHY_TAG_KEYWORDS: Record<'Friction' | 'Wishlist' | 'Retention' | 'Revenue'
 }
 
 const ENRICH_BATCH_SIZE = 20
-const ENRICH_TOP_N = 25
+const ENRICH_TOP_N = 150
 
 // ─── TF-IDF (silent fallback when AI call fails) ──────────────────────────────
 
@@ -397,21 +397,20 @@ export async function clusterTickets(
 
   type PoolFn = () => Promise<Omit<InsightGroup, 'temperatureScore' | 'temperature'>[]>
   const tasks: PoolFn[] = teamNames.flatMap(team => {
+    // Pool by team + category only — NOT by feature.
+    // Feature tags are inconsistent: "streak broken during meditation" can be tagged as
+    // "Meditations" or "Streaks & Progress" depending on who filed it. Splitting by feature
+    // puts those tickets in separate pools that never see each other and can never be grouped.
     const teamTickets = tickets.filter(t => (t.teamName ?? '') === team)
-    // Split by feature so each pool is focused — prevents cross-feature over-grouping
-    const featureNames = [...new Set(teamTickets.map(t => t.featureName ?? ''))]
+    const bugs = teamTickets.filter(t => t.category === 'Bug')
+    const feedback = teamTickets.filter(t => t.category === 'Feedback')
+    const uncategorised = teamTickets.filter(t => t.category !== 'Bug' && t.category !== 'Feedback')
     const key = apiKey ?? ''
-    return featureNames.flatMap(feature => {
-      const featureTickets = teamTickets.filter(t => (t.featureName ?? '') === feature)
-      const bugs = featureTickets.filter(t => t.category === 'Bug')
-      const feedback = featureTickets.filter(t => t.category === 'Feedback')
-      const uncategorised = featureTickets.filter(t => t.category !== 'Bug' && t.category !== 'Feedback')
-      return [
-        () => key ? clusterPool(bugs, 'Bug', key) : Promise.resolve(bugs.map(ticketToSingleton)),
-        () => key ? clusterPool(feedback, 'Feedback', key) : Promise.resolve(feedback.map(ticketToSingleton)),
-        () => key ? clusterPool(uncategorised, 'Feedback', key) : Promise.resolve(uncategorised.map(ticketToSingleton)),
-      ]
-    })
+    return [
+      () => key ? clusterPool(bugs, 'Bug', key) : Promise.resolve(bugs.map(ticketToSingleton)),
+      () => key ? clusterPool(feedback, 'Feedback', key) : Promise.resolve(feedback.map(ticketToSingleton)),
+      () => key ? clusterPool(uncategorised, 'Feedback', key) : Promise.resolve(uncategorised.map(ticketToSingleton)),
+    ]
   })
 
   const CONCURRENCY = 8
