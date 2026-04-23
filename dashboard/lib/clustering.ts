@@ -303,7 +303,8 @@ function computeTemperatures(rawGroups: {
 
 // ─── AI enrichment ────────────────────────────────────────────────────────────
 
-const ENRICH_BATCH_SIZE = 10
+const ENRICH_BATCH_SIZE = 20
+const ENRICH_TOP_N = 25
 
 async function enrichBatch(
   batch: InsightGroup[],
@@ -353,13 +354,17 @@ async function enrichWithAI(groups: InsightGroup[]): Promise<InsightGroup[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) return groups
 
+  // Only enrich top N groups — rest keep fallback titles
+  const toEnrich = groups.slice(0, ENRICH_TOP_N)
+  const rest = groups.slice(ENRICH_TOP_N)
+
   const batches: InsightGroup[][] = []
-  for (let i = 0; i < groups.length; i += ENRICH_BATCH_SIZE) {
-    batches.push(groups.slice(i, i + ENRICH_BATCH_SIZE))
+  for (let i = 0; i < toEnrich.length; i += ENRICH_BATCH_SIZE) {
+    batches.push(toEnrich.slice(i, i + ENRICH_BATCH_SIZE))
   }
 
   const results = await Promise.all(batches.map(b => enrichBatch(b, apiKey)))
-  return results.flat()
+  return [...results.flat(), ...rest]
 }
 
 // ─── Main clustering function ─────────────────────────────────────────────────
