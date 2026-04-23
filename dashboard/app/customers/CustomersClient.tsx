@@ -25,6 +25,14 @@ interface CustomerSession {
   }
   sessionStatus: string
   summary: string
+  attributes?: {
+    age: string
+    lifeStage: string
+    job: string
+    motivation: string
+    techLiteracy: string
+    device: string
+  }
 }
 
 type SegmentKey = 'membership' | 'premium'
@@ -257,12 +265,12 @@ export default function CustomersClient({ records }: { records: CustomerSession[
 
   // Compute distributions for each attribute
   const distributions = useMemo(() => {
-    const ages = filteredRecords.map(r => extractAge(r.summary))
-    const lifeStages = filteredRecords.map(r => extractLifeStage(r.summary))
-    const jobs = filteredRecords.map(r => extractJobProfession(r.summary))
-    const motivations = filteredRecords.map(r => extractMotivation(r.summary))
-    const techLiteracy = filteredRecords.map(r => extractTechLiteracy(r.summary))
-    const devices = filteredRecords.map(r => extractDevicePreference(r.summary))
+    const ages = filteredRecords.map(r => r.attributes?.age ?? extractAge(r.summary))
+    const lifeStages = filteredRecords.map(r => r.attributes?.lifeStage ?? extractLifeStage(r.summary))
+    const jobs = filteredRecords.map(r => r.attributes?.job ?? extractJobProfession(r.summary))
+    const motivations = filteredRecords.map(r => r.attributes?.motivation ?? extractMotivation(r.summary))
+    const techLiteracy = filteredRecords.map(r => r.attributes?.techLiteracy ?? extractTechLiteracy(r.summary))
+    const devices = filteredRecords.map(r => r.attributes?.device ?? extractDevicePreference(r.summary))
     const membershipTypes = filteredRecords.map(r => extractMembershipType(r.segment))
 
     return {
