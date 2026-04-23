@@ -64,9 +64,21 @@ function applyFilters(
 ): InsightGroup[] {
   let result = groups
   if (statusFilter === 'parking_lot') {
-    result = result.filter(g => g.tickets.some(t => t.status.toLowerCase() === 'parking lot'))
+    result = result
+      .map(g => ({
+        ...g,
+        tickets: g.tickets.filter(t => t.status.toLowerCase() === 'parking lot'),
+      }))
+      .filter(g => g.tickets.length > 0)
+      .map(g => ({ ...g, frequency: g.tickets.length }))
   } else if (statusFilter === 'wont_do') {
-    result = result.filter(g => g.tickets.some(t => t.status.toLowerCase() === "won't do"))
+    result = result
+      .map(g => ({
+        ...g,
+        tickets: g.tickets.filter(t => t.status.toLowerCase() === "won't do"),
+      }))
+      .filter(g => g.tickets.length > 0)
+      .map(g => ({ ...g, frequency: g.tickets.length }))
   }
   if (teamFilter) {
     result = result.filter(g => g.teamName?.toLowerCase() === teamFilter.toLowerCase())
