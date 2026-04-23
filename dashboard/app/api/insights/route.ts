@@ -7,10 +7,17 @@ export const dynamic = 'force-dynamic'
 
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
-const CLUSTER_CACHE_KEY = 'pid-clusters-v2'
+const CLUSTER_CACHE_KEY = 'pid-clusters-v3'
 const CLUSTER_CACHE_TTL = 3600
 
-async function readClusterCache(): Promise<InsightGroup[] | null> {
+interface CachedPayload {
+  groups: InsightGroup[]
+  total: number
+  parkingLot: number
+  wontDo: number
+}
+
+async function readClusterCache(): Promise<CachedPayload | null> {
   if (!REDIS_URL || !REDIS_TOKEN) return null
   try {
     const res = await fetch(`${REDIS_URL}/get/${CLUSTER_CACHE_KEY}`, {
@@ -19,13 +26,13 @@ async function readClusterCache(): Promise<InsightGroup[] | null> {
     })
     const json = await res.json() as { result: string | null }
     if (!json.result) return null
-    return JSON.parse(json.result) as InsightGroup[]
+    return JSON.parse(json.result) as CachedPayload
   } catch {
     return null
   }
 }
 
-async function writeClusterCache(data: InsightGroup[]): Promise<void> {
+async function writeClusterCache(data: CachedPayload): Promise<void> {
   if (!REDIS_URL || !REDIS_TOKEN) return
   try {
     await fetch(`${REDIS_URL}/pipeline`, {
@@ -41,96 +48,57 @@ async function writeClusterCache(data: InsightGroup[]): Promise<void> {
   }
 }
 
+function applyFilters(
+  groups: InsightGroup[],
+  statusFilter: string | null,
+  teamFilter: string | null,
+  categoryFilter: string | null,
+): InsightGroup[] {
+  let result = groups
+  if (statusFilter === 'parking_lot') {
+    result = result.filter(g => g.tickets.some(t => t.status.toLowerCase() === 'parking lot'))
+  } else if (statusFilter === 'wont_do') {
+    result = result.filter(g => g.tickets.some(t => t.status.toLowerCase() === "won't do"))
+  }
+  if (teamFilter) {
+    result = result.filter(g => g.teamName?.toLowerCase() === teamFilter.toLowerCase())
+  }
+  if (categoryFilter === 'Bug' || categoryFilter === 'Feedback') {
+    result = result.filter(g => g.category === categoryFilter)
+  }
+  return result
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = req.nextUrl
-    const statusFilter = searchParams.get('status') // 'parking_lot' | 'wont_do'
-    const categoryFilter = searchParams.get('category') // 'Bug' | 'Feedback'
-    const teamFilter = searchParams.get('team') // team name string
+    const statusFilter = searchParams.get('status')
+    const categoryFilter = searchParams.get('category')
+    const teamFilter = searchParams.get('team')
 
+    // Check cache BEFORE fetching Jira tickets — cache hit skips all slow work
+    const cached = await readClusterCache()
+    if (cached) {
+      const groups = applyFilters(cached.groups, statusFilter, teamFilter, categoryFilter)
+      return Response.json({ groups, total: cached.total, parkingLot: cached.parkingLot, wontDo: cached.wontDo })
+    }
+
+    // Cache miss — fetch tickets and cluster
     const { tickets, total } = await fetchJiraTickets()
+    const parkingLot = tickets.filter(t => t.status.toLowerCase() === 'parking lot').length
+    const wontDo = tickets.filter(t => t.status.toLowerCase() === "won't do").length
 
-    const parkingLot = tickets.filter(
-      t => t.status.toLowerCase() === 'parking lot',
-    ).length
-    const wontDo = tickets.filter(
-      t => t.status.toLowerCase() === "won't do",
-    ).length
-
-    // Apply status filter
-    let filtered = tickets
-    if (statusFilter === 'parking_lot') {
-      filtered = tickets.filter(t => t.status.toLowerCase() === 'parking lot')
-    } else if (statusFilter === 'wont_do') {
-      filtered = tickets.filter(t => t.status.toLowerCase() === "won't do")
-    }
-
-    // Apply team filter
-    if (teamFilter) {
-      filtered = filtered.filter(
-        t => t.teamName?.toLowerCase() === teamFilter.toLowerCase(),
-      )
-    }
-
-    const aiProvider = process.env.AI_PROVIDER ?? 'none'
-
-    // Try cluster Redis cache first
-    let groups: InsightGroup[]
-    const cachedGroups = await readClusterCache()
-    if (cachedGroups) {
-      // Apply status/team/category filters on cached data
-      let fromCache = cachedGroups
-      if (statusFilter === 'parking_lot') {
-        fromCache = fromCache.filter(g =>
-          g.tickets.some(t => t.status.toLowerCase() === 'parking lot'),
-        )
-      } else if (statusFilter === 'wont_do') {
-        fromCache = fromCache.filter(g =>
-          g.tickets.some(t => t.status.toLowerCase() === "won't do"),
-        )
-      }
-      if (teamFilter) {
-        fromCache = fromCache.filter(
-          g => g.teamName?.toLowerCase() === teamFilter.toLowerCase(),
-        )
-      }
-      if (categoryFilter === 'Bug' || categoryFilter === 'Feedback') {
-        fromCache = fromCache.filter(g => g.category === categoryFilter)
-      }
-      return Response.json({ groups: fromCache, total, parkingLot, wontDo })
-    }
-
-    // Cluster ALL tickets (both statuses) so cache covers both tabs
+    const aiProvider = process.env.ANTHROPIC_API_KEY ? 'claude' : 'none'
     const allGroups = await clusterTickets(tickets, aiProvider)
-    await writeClusterCache(allGroups)
 
-    // Apply filters for this request
-    groups = allGroups
-    if (statusFilter === 'parking_lot') {
-      groups = groups.filter(g => g.tickets.some(t => t.status.toLowerCase() === 'parking lot'))
-    } else if (statusFilter === 'wont_do') {
-      groups = groups.filter(g => g.tickets.some(t => t.status.toLowerCase() === "won't do"))
-    }
-    if (teamFilter) {
-      groups = groups.filter(g => g.teamName?.toLowerCase() === teamFilter.toLowerCase())
-    }
-    if (categoryFilter === 'Bug' || categoryFilter === 'Feedback') {
-      groups = groups.filter(g => g.category === categoryFilter)
-    }
+    await writeClusterCache({ groups: allGroups, total, parkingLot, wontDo })
 
-    return Response.json({
-      groups,
-      total,
-      parkingLot,
-      wontDo,
-    })
+    const groups = applyFilters(allGroups, statusFilter, teamFilter, categoryFilter)
+    return Response.json({ groups, total, parkingLot, wontDo })
   } catch (error) {
     console.error('[API /api/insights] Error:', error)
     return Response.json(
-      {
-        success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
+      { success: false, error: error instanceof Error ? error.message : 'Unknown error' },
       { status: 500 },
     )
   }
