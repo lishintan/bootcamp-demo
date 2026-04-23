@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
-const CLUSTER_CACHE_KEY = 'pid-clusters-v11'
+const CLUSTER_CACHE_KEY = 'pid-clusters-v12'
 const CLUSTER_CACHE_TTL = 3600
 
 interface CachedPayload {
@@ -99,8 +99,16 @@ export async function GET(req: NextRequest) {
     const aiProvider = process.env.ANTHROPIC_API_KEY ? 'claude' : 'none'
     const clustered = await clusterTickets(tickets, aiProvider)
 
-    // Remove groups where every ticket is archived — nothing actionable to show
-    const allGroups = clustered.filter(g => !g.tickets.every(t => t.archived))
+    // Remove groups where every ticket hasn't been updated in 18 months (stale/archived)
+    const cutoff = new Date()
+    cutoff.setMonth(cutoff.getMonth() - 18)
+    const allGroups = clustered.filter(g => {
+      const latestUpdate = g.tickets.reduce((best, t) => {
+        const d = new Date(t.updated || t.created)
+        return d > best ? d : best
+      }, new Date(0))
+      return latestUpdate >= cutoff
+    })
 
     await writeClusterCache({ groups: slimForCache(allGroups), total, parkingLot, wontDo })
 
