@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import staticCustomerSessions from '@/data/customer-sessions.json'
 import CustomersClient from './CustomersClient'
 
