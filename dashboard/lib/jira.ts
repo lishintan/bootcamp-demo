@@ -48,6 +48,7 @@ interface JiraSearchResponse {
 interface JiraIssueRaw {
   id: string
   key: string
+  archived?: boolean
   fields: Record<string, unknown>
 }
 
@@ -115,7 +116,7 @@ function mapIssue(issue: JiraIssueRaw): JiraTicket {
     featureTitle: typeof f[CUSTOM_FIELDS.featureTitle] === 'string'
       ? (f[CUSTOM_FIELDS.featureTitle] as string)
       : null,
-    archived: (issue as Record<string, unknown>).archived === true,
+    archived: issue.archived === true,
   }
 }
 
