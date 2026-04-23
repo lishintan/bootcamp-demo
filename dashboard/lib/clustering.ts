@@ -274,7 +274,7 @@ async function enrichBatch(batch: InsightGroup[], apiKey: string): Promise<Insig
   const batchContent = batch.map((g, i) => {
     const lines = g.tickets.slice(0, 5).map(t => {
       const desc = t.description?.trim().slice(0, 300) ?? ''
-      return `  - ${t.summary}${desc ? '\n    "${desc}"' : ''}`
+      return `  - ${t.summary}${desc ? `\n    "${desc}"` : ''}`
     }).join('\n')
     return `[${i + 1}] ${g.featureName} · ${g.category} · ${g.tickets.length} reports:\n${lines}`
   }).join('\n\n')
@@ -299,17 +299,25 @@ Return a JSON array of exactly ${batch.length} objects:
         }],
       }),
     })
-    if (!resp.ok) return batch
+    if (!resp.ok) {
+      console.error(`[enrich] API error ${resp.status}:`, await resp.text())
+      return batch
+    }
     const data = await resp.json() as { content: { type: string; text: string }[] }
     const text = data.content?.[0]?.text ?? ''
     const match = text.match(/\[[\s\S]*\]/)
-    const parsed = JSON.parse(match?.[0] ?? '[]') as { title?: string; summary?: string }[]
+    if (!match) {
+      console.error('[enrich] No JSON array in response:', text.slice(0, 300))
+      return batch
+    }
+    const parsed = JSON.parse(match[0]) as { title?: string; summary?: string }[]
     return batch.map((g, i) => ({
       ...g,
       title: parsed[i]?.title?.trim() || g.title,
       aiSummary: parsed[i]?.summary?.trim() || g.aiSummary,
     }))
-  } catch {
+  } catch (err) {
+    console.error('[enrich] Exception:', err)
     return batch
   }
 }
