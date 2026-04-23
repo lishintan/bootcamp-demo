@@ -373,7 +373,7 @@ export async function clusterTickets(
   const cacheKey = `${tickets.length}:${aiProvider}`
   if (clusterCache.has(cacheKey)) return clusterCache.get(cacheKey)!
 
-  const threshold = aiProvider === 'none' ? 0.45 : 0.80
+  const threshold = 0.45
 
   // Cluster within each team independently — prevents cross-team contamination
   const teamNames = [...new Set(tickets.map(t => t.teamName ?? ''))]
