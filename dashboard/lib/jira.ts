@@ -125,7 +125,7 @@ function mapIssue(issue: JiraIssueRaw): JiraTicket {
 
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
-const REDIS_CACHE_KEY = 'pid-jira-tickets-v5'
+const REDIS_CACHE_KEY = 'pid-jira-tickets-v6'
 const CACHE_TTL_SECONDS = 60 * 60 // 1 hour
 
 // In-memory fallback for when Redis is unavailable
@@ -164,6 +164,24 @@ async function writeRedisCache(data: { tickets: JiraTicket[]; total: number }): 
   }
 }
 
+async function fetchArchivedKeys(baseUrl: string, auth: string): Promise<Set<string>> {
+  try {
+    const url = new URL(`${baseUrl}/rest/api/3/search/jql`)
+    url.searchParams.set('jql', `project=PF AND status in ("Parking Lot","Won't Do") AND archived = true ORDER BY created DESC`)
+    url.searchParams.set('maxResults', '500')
+    url.searchParams.set('fields', 'summary')
+    const resp = await fetch(url.toString(), {
+      headers: { Authorization: `Basic ${auth}`, Accept: 'application/json' },
+      cache: 'no-store',
+    })
+    if (!resp.ok) return new Set()
+    const data = await resp.json() as { issues: { key: string }[] }
+    return new Set((data.issues ?? []).map((i: { key: string }) => i.key))
+  } catch {
+    return new Set()
+  }
+}
+
 export async function fetchJiraTickets(): Promise<{ tickets: JiraTicket[]; total: number }> {
   // 1. Try Redis (survives cold starts, shared across instances)
   const redisHit = await readRedisCache()
@@ -175,7 +193,9 @@ export async function fetchJiraTickets(): Promise<{ tickets: JiraTicket[]; total
   const baseUrl = process.env.JIRA_BASE_URL!
   const auth = getJiraAuth()
 
-  // JQL to fetch Parking Lot and Won't Do tickets from PF project
+  // Fetch archived issue keys in parallel — used to mark tickets; safe fallback if JQL unsupported
+  const [archivedKeys] = await Promise.all([fetchArchivedKeys(baseUrl, auth)])
+
   const jql = `project=PF AND status in ("Parking Lot","Won't Do") ORDER BY created DESC`
 
   const allTickets: JiraTicket[] = []
@@ -207,7 +227,9 @@ export async function fetchJiraTickets(): Promise<{ tickets: JiraTicket[]; total
     const data: JiraSearchResponse = await resp.json()
 
     for (const issue of data.issues) {
-      allTickets.push(mapIssue(issue))
+      const ticket = mapIssue(issue)
+      ticket.archived = ticket.archived || archivedKeys.has(ticket.key)
+      allTickets.push(ticket)
     }
 
     nextPageToken = data.issues.length === maxResults ? data.nextPageToken : undefined
