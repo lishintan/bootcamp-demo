@@ -116,7 +116,7 @@ function mapIssue(issue: JiraIssueRaw): JiraTicket {
     featureTitle: typeof f[CUSTOM_FIELDS.featureTitle] === 'string'
       ? (f[CUSTOM_FIELDS.featureTitle] as string)
       : null,
-    archived: issue.archived === true,
+    archived: issue.archived === true || (issue as Record<string, unknown>).archivedDate != null,
   }
 }
 
@@ -173,7 +173,7 @@ export async function fetchJiraTickets(): Promise<{ tickets: JiraTicket[]; total
   const auth = getJiraAuth()
 
   // JQL to fetch Parking Lot and Won't Do tickets from PF project
-  const jql = `project=PF AND status in ("Parking Lot","Won't Do") AND issueArchiveStatus NOT IN (ARCHIVED) ORDER BY created DESC`
+  const jql = `project=PF AND status in ("Parking Lot","Won't Do") ORDER BY created DESC`
 
   const allTickets: JiraTicket[] = []
   let nextPageToken: string | undefined
