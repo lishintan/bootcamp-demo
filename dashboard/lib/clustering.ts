@@ -325,7 +325,7 @@ async function enrichBatch(
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 120 * batch.length,
+        max_tokens: 300 * batch.length,
         messages: [{
           role: 'user',
           content: `Analyze these ${batch.length} product feedback groups. For each group numbered [1]–[${batch.length}], generate a title (6-10 words, specific) and summary (2 sentences: what users experience + business impact).\n\n${batchContent}\n\nReturn a JSON array of exactly ${batch.length} objects:\n[{"title":"...","summary":"..."}, ...]`,
