@@ -12,7 +12,7 @@ interface CustomerAttributes {
 
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
-const CACHE_KEY = 'pid-customers-v1'
+const CACHE_KEY = 'pid-customers-v2'
 const CACHE_TTL = 60 * 60 * 6
 const BATCH_SIZE = 20
 const DEFAULTS: CustomerAttributes = {
@@ -94,7 +94,9 @@ async function getEnrichedAttributes(summaries: string[]): Promise<CustomerAttri
   }
   const results = await Promise.all(batches.map(b => enrichBatch(b, apiKey)))
   const attributes = results.flat()
-  await writeCache(attributes)
+  // Only cache if enrichment actually produced varied results (not all defaults)
+  const allDefault = attributes.every(a => a.age === DEFAULTS.age && a.job === DEFAULTS.job)
+  if (!allDefault) await writeCache(attributes)
   return attributes
 }
 
