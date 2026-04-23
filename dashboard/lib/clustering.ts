@@ -474,7 +474,7 @@ function clusterPool(
       temperature: 'Cold' as const,
       temperatureScore: 0,
       hook,
-      title: groupTickets[0]?.summary?.slice(0, 80) ?? '',
+      title: rep.summary ?? '',
       aiSummary: '',
       whyTag,
     }

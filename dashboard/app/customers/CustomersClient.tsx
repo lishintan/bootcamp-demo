@@ -238,12 +238,21 @@ function AttributeChart({
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 export default function CustomersClient({ records }: { records: CustomerSession[] }) {
-  const [activeSegment, setActiveSegment] = useState<SegmentKey>('membership')
+  const [activeSegments, setActiveSegments] = useState<Set<SegmentKey>>(new Set(['membership', 'premium']))
 
-  // Filter records by selected segment
+  function toggleSegment(seg: SegmentKey) {
+    setActiveSegments(prev => {
+      const next = new Set(prev)
+      if (next.has(seg) && next.size > 1) next.delete(seg)
+      else next.add(seg)
+      return next
+    })
+  }
+
+  // Filter records by selected segments
   const filteredRecords = useMemo(
-    () => records.filter(r => classifySegment(r.segment, r.summary) === activeSegment),
-    [records, activeSegment]
+    () => records.filter(r => activeSegments.has(classifySegment(r.segment, r.summary))),
+    [records, activeSegments]
   )
 
   // Compute distributions for each attribute
@@ -272,6 +281,18 @@ export default function CustomersClient({ records }: { records: CustomerSession[
     premium: records.filter(r => classifySegment(r.segment, r.summary) === 'premium').length,
   }), [records])
 
+  const segmentLabel = activeSegments.size === 2
+    ? 'All Segments'
+    : activeSegments.has('membership') ? 'Mindvalley Membership' : 'Premium Programs'
+
+  const segmentColor = activeSegments.size === 2
+    ? 'text-gray-300'
+    : activeSegments.has('membership') ? 'text-indigo-300' : 'text-amber-300'
+
+  const dotColor = activeSegments.size === 2
+    ? 'bg-gray-400'
+    : activeSegments.has('membership') ? 'bg-indigo-400' : 'bg-amber-400'
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -286,31 +307,31 @@ export default function CustomersClient({ records }: { records: CustomerSession[
       <div className="flex items-center gap-3">
         <span className="text-xs text-gray-500 font-medium uppercase tracking-wide">Segment:</span>
         <button
-          onClick={() => setActiveSegment('membership')}
+          onClick={() => toggleSegment('membership')}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-            activeSegment === 'membership'
+            activeSegments.has('membership')
               ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/40'
               : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200 border border-gray-700'
           }`}
         >
           Mindvalley Membership
           <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full ${
-            activeSegment === 'membership' ? 'bg-indigo-500 text-white' : 'bg-gray-700 text-gray-400'
+            activeSegments.has('membership') ? 'bg-indigo-500 text-white' : 'bg-gray-700 text-gray-400'
           }`}>
             {segmentCounts.membership}
           </span>
         </button>
         <button
-          onClick={() => setActiveSegment('premium')}
+          onClick={() => toggleSegment('premium')}
           className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-            activeSegment === 'premium'
+            activeSegments.has('premium')
               ? 'bg-amber-600 text-white shadow-lg shadow-amber-900/40'
               : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200 border border-gray-700'
           }`}
         >
           Premium Programs
           <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full ${
-            activeSegment === 'premium' ? 'bg-amber-500 text-white' : 'bg-gray-700 text-gray-400'
+            activeSegments.has('premium') ? 'bg-amber-500 text-white' : 'bg-gray-700 text-gray-400'
           }`}>
             {segmentCounts.premium}
           </span>
@@ -319,12 +340,10 @@ export default function CustomersClient({ records }: { records: CustomerSession[
 
       {/* Summary bar */}
       <div className="bg-gray-800 border border-gray-700 rounded-xl px-5 py-3 flex items-center gap-2">
-        <span className={`inline-block w-2 h-2 rounded-full ${activeSegment === 'membership' ? 'bg-indigo-400' : 'bg-amber-400'}`} />
+        <span className={`inline-block w-2 h-2 rounded-full ${dotColor}`} />
         <span className="text-sm text-gray-300">
           Showing <span className="font-semibold text-white">{filteredRecords.length}</span> customer{filteredRecords.length !== 1 ? 's' : ''} in{' '}
-          <span className={`font-semibold ${activeSegment === 'membership' ? 'text-indigo-300' : 'text-amber-300'}`}>
-            {activeSegment === 'membership' ? 'Mindvalley Membership' : 'Premium Programs'}
-          </span>
+          <span className={`font-semibold ${segmentColor}`}>{segmentLabel}</span>
         </span>
       </div>
 
