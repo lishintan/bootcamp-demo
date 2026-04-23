@@ -15,7 +15,8 @@ export interface JiraTicket {
   customerSegment: string[] | null // customfield_10435 (e.g., MVM Users)
   platform: string | null          // customfield_10510 (iOS/Android/Web)
   featureTitle: string | null      // customfield_11702 (Feature description string)
-  archived: boolean                // Jira native archive flag
+  archived: boolean                // true if all heuristics suggest archived
+  updated: string                  // last update timestamp
 }
 
 // Custom field IDs discovered from the PF project
@@ -36,6 +37,7 @@ const FIELDS_PARAM = [
   'status',
   'labels',
   'created',
+  'updated',
   'priority',
   ...Object.values(CUSTOM_FIELDS),
 ].join(',')
@@ -116,13 +118,14 @@ function mapIssue(issue: JiraIssueRaw): JiraTicket {
     featureTitle: typeof f[CUSTOM_FIELDS.featureTitle] === 'string'
       ? (f[CUSTOM_FIELDS.featureTitle] as string)
       : null,
-    archived: issue.archived === true || (issue as unknown as Record<string, unknown>).archivedDate != null,
+    updated: (f.updated as string) || (f.created as string) || '',
+    archived: issue.archived === true,
   }
 }
 
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
-const REDIS_CACHE_KEY = 'pid-jira-tickets-v4'
+const REDIS_CACHE_KEY = 'pid-jira-tickets-v5'
 const CACHE_TTL_SECONDS = 60 * 60 // 1 hour
 
 // In-memory fallback for when Redis is unavailable
