@@ -132,7 +132,7 @@ async function aiClusterPool(
 
   const lines = tickets
     .map((t, i) => {
-      const desc = t.description?.trim().slice(0, 150) ?? ''
+      const desc = t.description?.trim().slice(0, 500) ?? ''
       return `[${i}] ${t.summary}${desc ? ' — ' + desc : ''}`
     })
     .join('\n')
