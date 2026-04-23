@@ -302,52 +302,63 @@ function computeTemperatures(rawGroups: {
 
 // ─── AI enrichment ────────────────────────────────────────────────────────────
 
+const ENRICH_BATCH_SIZE = 10
+
+async function enrichBatch(
+  batch: InsightGroup[],
+  apiKey: string,
+): Promise<InsightGroup[]> {
+  const batchContent = batch.map((g, i) => {
+    const lines = g.tickets.slice(0, 8).map(t => `- ${t.summary}`).join('\n')
+    return `[${i + 1}] ${g.category} · ${g.teamName} · ${g.tickets.length} reports:\n${lines}`
+  }).join('\n\n')
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 120 * batch.length,
+        messages: [{
+          role: 'user',
+          content: `Analyze these ${batch.length} product feedback groups. For each group numbered [1]–[${batch.length}], generate a title (6-10 words, specific) and summary (2 sentences: what users experience + business impact).\n\n${batchContent}\n\nReturn a JSON array of exactly ${batch.length} objects:\n[{"title":"...","summary":"..."}, ...]`,
+        }],
+      }),
+    })
+
+    if (!resp.ok) return batch
+
+    const data = await resp.json() as { content: { type: string; text: string }[] }
+    const text = data.content?.[0]?.text ?? ''
+    const match = text.match(/\[[\s\S]*\]/)
+    const parsed = JSON.parse(match?.[0] ?? '[]') as { title?: string; summary?: string }[]
+
+    return batch.map((g, i) => ({
+      ...g,
+      title: parsed[i]?.title?.trim() || g.title,
+      aiSummary: parsed[i]?.summary?.trim() || g.aiSummary,
+    }))
+  } catch {
+    return batch
+  }
+}
+
 async function enrichWithAI(groups: InsightGroup[]): Promise<InsightGroup[]> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) return groups
 
-  const enriched = await Promise.all(groups.map(async (group) => {
-    try {
-      const ticketLines = group.tickets
-        .slice(0, 15)
-        .map(t => `- ${t.summary}`)
-        .join('\n')
+  const batches: InsightGroup[][] = []
+  for (let i = 0; i < groups.length; i += ENRICH_BATCH_SIZE) {
+    batches.push(groups.slice(i, i + ENRICH_BATCH_SIZE))
+  }
 
-      const resp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 200,
-          messages: [{
-            role: 'user',
-            content: `You analyze product feedback for a product intelligence dashboard. Team: ${group.teamName}. Category: ${group.category}. ${group.tickets.length} user reports:\n${ticketLines}\n\nGenerate:\n1. Title: 6-10 word headline naming the specific problem (not generic)\n2. Summary: 2 sentences. Sentence 1: what users are experiencing. Sentence 2: the business/user impact.\n\nJSON only: {"title": "...", "summary": "..."}`,
-          }],
-        }),
-      })
-
-      if (!resp.ok) return group
-
-      const data = await resp.json() as { content: { type: string; text: string }[] }
-      const text = data.content?.[0]?.text ?? ''
-      const match = text.match(/\{[\s\S]*?\}/)
-      const parsed = JSON.parse(match?.[0] ?? '{}') as { title?: string; summary?: string }
-
-      return {
-        ...group,
-        title: parsed.title?.trim() || group.title,
-        aiSummary: parsed.summary?.trim() || group.aiSummary,
-      }
-    } catch {
-      return group
-    }
-  }))
-
-  return enriched
+  const results = await Promise.all(batches.map(b => enrichBatch(b, apiKey)))
+  return results.flat()
 }
 
 // ─── Main clustering function ─────────────────────────────────────────────────
