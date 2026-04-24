@@ -283,7 +283,7 @@ function computeTemperatures(rawGroups: { frequency: number; impactScore: number
 
   const freqNorm = normalise(rawGroups.map(g => g.frequency))
   const recencyNorm = normalise(rawGroups.map(g => -g.recencyDays))
-  const scores = rawGroups.map((_, i) => freqNorm[i] * 0.5 + recencyNorm[i] * 0.5)
+  const scores = rawGroups.map((_, i) => freqNorm[i] * 0.7 + recencyNorm[i] * 0.3)
 
   const sorted = [...scores].sort((a, b) => a - b)
   const p30 = sorted[Math.floor(sorted.length * 0.29)]
@@ -403,30 +403,40 @@ export async function clusterTickets(
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) console.warn('[clustering] No GEMINI_API_KEY — grouping by TF-IDF only')
 
-  // Global clustering per category — all tickets in one AI call so it can compare
-  // every ticket against every other before grouping. No team-based sub-pools.
-  const bugs = tickets.filter(t => t.category === 'Bug')
-  const feedback = tickets.filter(t => t.category === 'Feedback')
-  const other = tickets.filter(t => t.category !== 'Bug' && t.category !== 'Feedback')
+  // Pool strictly by team → feature → category, then cluster by meaning within each pool.
+  // Team boundaries are never crossed. Feature boundaries are never crossed.
+  type TicketPool = { tickets: JiraTicket[]; category: 'Bug' | 'Feedback' }
+  const pools: TicketPool[] = []
 
-  async function clusterCategory(
-    pool: JiraTicket[],
-    cat: 'Bug' | 'Feedback',
-  ): Promise<Omit<InsightGroup, 'temperatureScore' | 'temperature'>[]> {
-    if (pool.length === 0) return []
-    const indices = apiKey
-      ? await aiClusterGlobal(pool, cat, apiKey)
-      : pool.map((_: JiraTicket, i: number) => [i])
-    return buildGroups(pool, indices, cat)
+  const teams = [...new Set(tickets.map(t => t.teamName ?? ''))]
+  for (const team of teams) {
+    const teamTickets = tickets.filter(t => (t.teamName ?? '') === team)
+    const features = [...new Set(teamTickets.map(t => t.featureName ?? ''))]
+    for (const feature of features) {
+      const featureTickets = teamTickets.filter(t => (t.featureName ?? '') === feature)
+      const bugs = featureTickets.filter(t => t.category === 'Bug')
+      const feedback = featureTickets.filter(t => t.category === 'Feedback')
+      const other = featureTickets.filter(t => t.category !== 'Bug' && t.category !== 'Feedback')
+      if (bugs.length > 0) pools.push({ tickets: bugs, category: 'Bug' })
+      if (feedback.length > 0) pools.push({ tickets: feedback, category: 'Feedback' })
+      if (other.length > 0) pools.push({ tickets: other, category: 'Feedback' })
+    }
   }
 
-  const [bugGroups, feedbackGroups, otherGroups] = await Promise.all([
-    clusterCategory(bugs, 'Bug'),
-    clusterCategory(feedback, 'Feedback'),
-    clusterCategory(other, 'Feedback'),
-  ])
+  const CONCURRENCY = 8
+  const rawGroups: Omit<InsightGroup, 'temperatureScore' | 'temperature'>[] = []
+  for (let i = 0; i < pools.length; i += CONCURRENCY) {
+    const batch = pools.slice(i, i + CONCURRENCY)
+    const results = await Promise.all(
+      batch.map(({ tickets: pool, category }) => {
+        if (!apiKey) return Promise.resolve(buildGroups(pool, pool.map((_: JiraTicket, idx: number) => [idx]), category))
+        return aiClusterGlobal(pool, category, apiKey).then(indices => buildGroups(pool, indices, category))
+      }),
+    )
+    rawGroups.push(...results.flat())
+  }
 
-  const allGroups = [...bugGroups, ...feedbackGroups, ...otherGroups]
+  const allGroups = rawGroups
   const now = Date.now()
   const temps = computeTemperatures(allGroups.map(g => ({
     frequency: g.frequency,

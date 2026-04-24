@@ -480,10 +480,8 @@ function InsightCard({
       {/* Title */}
       <h3 className="text-sm font-semibold text-white leading-snug">{group.title || group.representativeTicket.summary}</h3>
 
-      {/* AI Summary */}
-      {group.aiSummary && (
-        <p className="text-xs text-gray-400 leading-relaxed">{group.aiSummary}</p>
-      )}
+      {/* Description — AI summary when available, raw hook as fallback */}
+      <p className="text-xs text-gray-400 leading-relaxed">{group.aiSummary || group.hook}</p>
 
       {/* Frequency */}
       <div className="text-xs text-gray-400">
