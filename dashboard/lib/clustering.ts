@@ -159,14 +159,15 @@ async function aiClusterPool(
   try {
     const raw = await callGemini(
       apiKey,
-      `Group these ${tickets.length} ${category === 'Bug' ? 'bug' : 'feedback'} tickets by the specific user-facing problem they describe.
+      `Group these ${tickets.length} ${category === 'Bug' ? 'bug' : 'feedback'} tickets by the core user insight they represent.
 
 RULES:
-1. Only group tickets that describe the SAME broken feature OR the SAME specific request — not just tickets that share a keyword.
-2. The ROOT PROBLEM must match: "streak counter not updating" and "video freezing mid-lesson" are DIFFERENT problems even if both happen during a meditation session.
-3. "Streak not credited after session" + "streak resets unexpectedly" + "sessions not counting toward streak" → same group (streak tracking broken).
-4. "App freezes during lesson" + "video won't load" → same group (playback broken). But these must NOT merge with streak issues.
-5. When in doubt, keep separate. A missed grouping is better than a wrong one.
+1. Group by the USER'S UNDERLYING FRUSTRATION or NEED — not by the exact wording or specific feature requested.
+   - "streak freeze option", "streak save", "grace period for missed day", "streak forgiveness" → same frustration: losing streaks feels unfair → ONE group
+   - "video won't load", "lesson freezes", "content won't play" → same frustration: playback is broken → ONE group
+2. Different user needs = different groups. "Streak protection" ≠ "offline access" ≠ "quest reset" ≠ "lesson playback".
+3. Merge tickets that express the same frustration even if they propose different solutions.
+4. Keep separate only when the underlying frustration or affected feature is genuinely different.
 
 ${lines}
 
