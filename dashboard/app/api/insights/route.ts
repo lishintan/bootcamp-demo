@@ -8,7 +8,7 @@ export const maxDuration = 300
 
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
-const CLUSTER_CACHE_KEY = 'pid-clusters-v27'
+const CLUSTER_CACHE_KEY = 'pid-clusters-v28'
 const CLUSTER_CACHE_TTL = 86400 // 24 hours
 
 interface CachedPayload {
