@@ -8,7 +8,7 @@ export const maxDuration = 300
 
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
-const CLUSTER_CACHE_KEY = 'pid-clusters-v40'
+const CLUSTER_CACHE_KEY = 'pid-clusters-v41'
 const CLUSTER_CACHE_TTL = 86400 // 24 hours
 
 interface CachedPayload {
@@ -87,6 +87,8 @@ function applyFilters(
   if (categoryFilter === 'Bug' || categoryFilter === 'Feedback') {
     result = result.filter(g => g.category === categoryFilter)
   }
+  // Only surface groups with 2+ reports — single-report cards are noise at dashboard level
+  result = result.filter(g => g.frequency >= 2)
   return result
 }
 

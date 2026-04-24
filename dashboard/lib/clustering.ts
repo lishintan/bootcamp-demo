@@ -151,18 +151,20 @@ async function aiClusterOnly(
   if (tickets.length === 0) return []
   if (tickets.length === 1) return [[0]]
 
-  const lines = tickets.map((t, i) => `[${i}] ${t.summary}`).join('\n')
+  // Include feature name so AI can distinguish cross-feature symptoms (lesson vs meditation playback)
+  const lines = tickets.map((t, i) => `[${i}] [${t.featureName ?? 'General'}] ${t.summary}`).join('\n')
 
   try {
     const raw = await callGemini(
       apiKey,
-      `You are a product analyst grouping ${category === 'Bug' ? 'bug reports' : 'feedback'}.
+      `You are a product analyst grouping ${category === 'Bug' ? 'bug reports' : 'feedback'} for a PM dashboard.
 
-GROUP tickets describing the SAME specific issue (~70% similar is enough):
-✓ MERGE: "Streak fails after timezone change" + "Streak resets despite completing program" → same: streak unreliable
-✗ SEPARATE: "Streak resets" vs "Add streak shields" → bug vs feature request
-✓ MERGE: "Video won't load on iOS" + "Blank screen on iPad lesson" → same: video not loading
-✗ SEPARATE: "Video won't load" vs "Video quality is poor" → different problems
+MERGE tickets that share the SAME ROOT CAUSE or broken system (~70% similar is enough), even across feature areas:
+✓ MERGE: "[Streaks & Progress] Streak resets after lesson" + "[Meditations] Streak resets after meditating" → same root: streak tracking broken
+✓ MERGE: "[Streaks & Progress] Streak counter wrong after timezone change" + "[Meditations] Streak didn't register today" → same root: streak tracking unreliable
+✗ SEPARATE: "[Lesson Player] Video won't load" vs "[Meditations] Audio won't play" → different feature codebases, different issues
+✗ SEPARATE: "Streak resets" vs "Add streak shields feature" → bug vs wishlist feature request
+✗ SEPARATE: tickets with clearly different problems, even in the same feature
 
 ${lines}
 
@@ -196,7 +198,7 @@ async function enrichAll(
     const batch = groups.slice(i, i + BATCH)
     const lines = batch
       .map((g, bi) => {
-        const titles = g.tickets.map(t => t.summary).join(' | ')
+        const titles = g.tickets.map(t => `[${t.featureName ?? ''}] ${t.summary}`).join(' | ')
         return `[${bi}] ${titles}`
       })
       .join('\n')
@@ -392,25 +394,32 @@ export async function clusterTickets(
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) console.warn('[clustering] No GEMINI_API_KEY — grouping by TF-IDF only')
 
-  // Pool strictly by team → feature → category.
-  // Lesson playback and meditation playback are different features — they must never
-  // be merged. Feature tags define the grouping boundary; the AI clusters by meaning
-  // within each feature pool.
+  // Pool by team → category only. Feature name is passed to the AI as context so it can
+  // still distinguish unrelated same-symptom issues (lesson playback vs meditation playback),
+  // while correctly merging cross-feature issues that share a root cause (streak tracking).
+  // Split oversized pools by feature to keep each AI call manageable (<= 50 tickets).
+  const MAX_POOL = 50
   type TicketPool = { tickets: JiraTicket[]; category: 'Bug' | 'Feedback' }
   const pools: TicketPool[] = []
 
   const teams = [...new Set(tickets.map(t => t.teamName ?? ''))]
   for (const team of teams) {
     const teamTickets = tickets.filter(t => (t.teamName ?? '') === team)
-    const features = [...new Set(teamTickets.map(t => t.featureName ?? ''))]
-    for (const feature of features) {
-      const ft = teamTickets.filter(t => (t.featureName ?? '') === feature)
-      const bugs = ft.filter(t => t.category === 'Bug')
-      const feedback = ft.filter(t => t.category === 'Feedback')
-      const other = ft.filter(t => t.category !== 'Bug' && t.category !== 'Feedback')
-      if (bugs.length > 0) pools.push({ tickets: bugs, category: 'Bug' })
-      if (feedback.length > 0) pools.push({ tickets: feedback, category: 'Feedback' })
-      if (other.length > 0) pools.push({ tickets: other, category: 'Feedback' })
+    for (const category of ['Bug', 'Feedback'] as const) {
+      const catTickets = teamTickets.filter(t =>
+        category === 'Bug' ? t.category === 'Bug' : t.category !== 'Bug',
+      )
+      if (catTickets.length === 0) continue
+      if (catTickets.length <= MAX_POOL) {
+        pools.push({ tickets: catTickets, category })
+      } else {
+        // Too large — split by feature to keep pools manageable
+        const features = [...new Set(catTickets.map(t => t.featureName ?? ''))]
+        for (const feature of features) {
+          const ft = catTickets.filter(t => (t.featureName ?? '') === feature)
+          if (ft.length > 0) pools.push({ tickets: ft, category })
+        }
+      }
     }
   }
 
