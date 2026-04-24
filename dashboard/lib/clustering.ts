@@ -193,6 +193,25 @@ Example: [[0,3],[1,4],[2],[5,6]]`,
 
 // ─── Hook generation ─────────────────────────────────────────────────────────
 
+const TITLE_CASE_MINORS = new Set([
+  'a','an','the','and','but','or','for','nor','on','at','to','by','in','of','up','as','with','from',
+])
+
+function toTitleCase(str: string): string {
+  return str
+    .split(' ')
+    .map((word, i) => {
+      if (!word) return word
+      if (i === 0 || !TITLE_CASE_MINORS.has(word.toLowerCase())) {
+        // Preserve already-correct casing for acronyms/proper nouns (iOS, iPad, AI)
+        if (word === word.toUpperCase() && word.length > 1) return word
+        return word.charAt(0).toUpperCase() + word.slice(1)
+      }
+      return word.toLowerCase()
+    })
+    .join(' ')
+}
+
 function cleanText(text: string): string {
   return text
     .replace(/\*\*(.+?)\*\*/g, '$1')
@@ -257,9 +276,8 @@ function computeTemperatures(rawGroups: { frequency: number; impactScore: number
   if (rawGroups.length === 1) return [{ temperatureScore: 50, temperature: 'Hot' as const }]
 
   const freqNorm = normalise(rawGroups.map(g => g.frequency))
-  const impactNorm = normalise(rawGroups.map(g => g.impactScore))
   const recencyNorm = normalise(rawGroups.map(g => -g.recencyDays))
-  const scores = rawGroups.map((_, i) => freqNorm[i] * 0.4 + impactNorm[i] * 0.3 + recencyNorm[i] * 0.3)
+  const scores = rawGroups.map((_, i) => freqNorm[i] * 0.5 + recencyNorm[i] * 0.5)
 
   const sorted = [...scores].sort((a, b) => a - b)
   const p30 = sorted[Math.floor(sorted.length * 0.29)]
@@ -304,7 +322,7 @@ Return a JSON array of exactly ${batch.length} objects:
     const parsed = JSON.parse(match[0]) as { title?: string; summary?: string }[]
     return batch.map((g, i) => ({
       ...g,
-      title: parsed[i]?.title?.trim() || g.title,
+      title: toTitleCase(parsed[i]?.title?.trim() || g.title),
       aiSummary: parsed[i]?.summary?.trim() || g.aiSummary,
     }))
   } catch (err) {
@@ -446,7 +464,7 @@ async function clusterPool(
       temperature: 'Cold' as const,
       temperatureScore: 0,
       hook: generateHook(groupTickets),
-      title: rep.summary ?? '',
+      title: toTitleCase(rep.summary ?? ''),
       aiSummary: '',
       whyTag: classifyWhyTag(groupTickets),
     }
