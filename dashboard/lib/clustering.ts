@@ -42,8 +42,7 @@ const WHY_TAG_KEYWORDS: Record<'Friction' | 'Wishlist' | 'Retention' | 'Revenue'
   ],
 }
 
-const ENRICH_BATCH_SIZE = 20
-const ENRICH_TOP_N = 150
+const ENRICH_BATCH_SIZE = 10
 
 // ─── TF-IDF (silent fallback when AI call fails) ──────────────────────────────
 
@@ -160,10 +159,14 @@ async function aiClusterPool(
   try {
     const raw = await callGemini(
       apiKey,
-      `Group these ${tickets.length} product ${category === 'Bug' ? 'bug' : 'feedback'} tickets by user-facing problem. Two tickets belong in the same group if a user would describe them as the same issue — even if the technical details differ.
+      `Group these ${tickets.length} ${category === 'Bug' ? 'bug' : 'feedback'} tickets by the specific user-facing problem they describe.
 
-For bugs: "streak not credited", "streak resets", "sessions not registering affecting streak" are ALL the same user problem → one group.
-For feedback: "add dark mode" and "app needs dark theme" are the same request → one group. But "add dark mode" and "improve navigation" are different → separate groups.
+RULES:
+1. Only group tickets that describe the SAME broken feature OR the SAME specific request — not just tickets that share a keyword.
+2. The ROOT PROBLEM must match: "streak counter not updating" and "video freezing mid-lesson" are DIFFERENT problems even if both happen during a meditation session.
+3. "Streak not credited after session" + "streak resets unexpectedly" + "sessions not counting toward streak" → same group (streak tracking broken).
+4. "App freezes during lesson" + "video won't load" → same group (playback broken). But these must NOT merge with streak issues.
+5. When in doubt, keep separate. A missed grouping is better than a wrong one.
 
 ${lines}
 
@@ -289,7 +292,7 @@ ${batchContent}
 
 Return a JSON array of exactly ${batch.length} objects:
 [{"title":"...","summary":"..."}, ...]`,
-      400 * batch.length,
+      Math.min(250 * batch.length, 3000),
     )
 
     const match = text.match(/\[[\s\S]*\]/)
@@ -312,12 +315,10 @@ Return a JSON array of exactly ${batch.length} objects:
 async function enrichWithAI(groups: InsightGroup[]): Promise<InsightGroup[]> {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) return groups
-  const toEnrich = groups.slice(0, ENRICH_TOP_N)
-  const rest = groups.slice(ENRICH_TOP_N)
   const batches: InsightGroup[][] = []
-  for (let i = 0; i < toEnrich.length; i += ENRICH_BATCH_SIZE) batches.push(toEnrich.slice(i, i + ENRICH_BATCH_SIZE))
+  for (let i = 0; i < groups.length; i += ENRICH_BATCH_SIZE) batches.push(groups.slice(i, i + ENRICH_BATCH_SIZE))
   const results = await Promise.all(batches.map(b => enrichBatch(b, apiKey)))
-  return [...results.flat(), ...rest]
+  return results.flat()
 }
 
 // ─── Pool clustering ──────────────────────────────────────────────────────────
