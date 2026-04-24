@@ -143,28 +143,34 @@ async function callGemini(apiKey: string, prompt: string, maxTokens: number): Pr
 
 // Step 1 of 2: cluster tickets into groups (indices only, no titles/summaries yet).
 // Enrichment happens in a separate guaranteed pass after ALL pools are clustered.
+// Each pool is scoped to one team + feature + category, so the AI only sees tickets
+// for a single product stream — keeps context small and clustering accurate.
 async function aiClusterOnly(
   tickets: JiraTicket[],
   category: 'Bug' | 'Feedback',
   apiKey: string,
+  featureName?: string,
+  teamName?: string,
 ): Promise<number[][]> {
   if (tickets.length === 0) return []
   if (tickets.length === 1) return [[0]]
 
-  // Include feature name so AI can distinguish cross-feature symptoms (lesson vs meditation playback)
-  const lines = tickets.map((t, i) => `[${i}] [${t.featureName ?? 'General'}] ${t.summary}`).join('\n')
+  const context = featureName
+    ? `for the "${featureName}" feature${teamName ? ` (${teamName} team)` : ''}`
+    : 'for a PM dashboard'
+
+  const lines = tickets.map((t, i) => `[${i}] ${t.summary}`).join('\n')
 
   try {
     const raw = await callGemini(
       apiKey,
-      `You are a product analyst grouping ${category === 'Bug' ? 'bug reports' : 'feedback'} for a PM dashboard.
+      `You are a product analyst grouping ${category === 'Bug' ? 'bug reports' : 'user feedback'} ${context}.
 
-MERGE tickets that share the SAME ROOT CAUSE or broken system (~70% similar is enough), even across feature areas:
-✓ MERGE: "[Streaks & Progress] Streak resets after lesson" + "[Meditations] Streak resets after meditating" → same root: streak tracking broken
-✓ MERGE: "[Streaks & Progress] Streak counter wrong after timezone change" + "[Meditations] Streak didn't register today" → same root: streak tracking unreliable
-✗ SEPARATE: "[Lesson Player] Video won't load" vs "[Meditations] Audio won't play" → different feature codebases, different issues
-✗ SEPARATE: "Streak resets" vs "Add streak shields feature" → bug vs wishlist feature request
-✗ SEPARATE: tickets with clearly different problems, even in the same feature
+MERGE tickets that share the SAME root problem or user friction point:
+✓ MERGE: Multiple users reporting the same bug or pain point
+✓ MERGE: Different descriptions of the same underlying issue
+✗ SEPARATE: Genuinely different problems, even if they occur in the same area
+✗ SEPARATE: Issues that sound similar but have different root causes
 
 ${lines}
 
@@ -394,30 +400,27 @@ export async function clusterTickets(
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) console.warn('[clustering] No GEMINI_API_KEY — grouping by TF-IDF only')
 
-  // Pool by team → category only. Feature name is passed to the AI as context so it can
-  // still distinguish unrelated same-symptom issues (lesson playback vs meditation playback),
-  // while correctly merging cross-feature issues that share a root cause (streak tracking).
-  // Split oversized pools by feature to keep each AI call manageable (<= 50 tickets).
+  // Pool by team + feature + category — each pool is one product stream.
+  // This keeps every AI call focused on a single feature's tickets, avoiding context
+  // window pressure that causes missed or mis-grouped tickets in larger pools.
   const MAX_POOL = 50
-  type TicketPool = { tickets: JiraTicket[]; category: 'Bug' | 'Feedback' }
+  type TicketPool = { tickets: JiraTicket[]; category: 'Bug' | 'Feedback'; teamName: string; featureName: string }
   const pools: TicketPool[] = []
 
   const teams = [...new Set(tickets.map(t => t.teamName ?? ''))]
   for (const team of teams) {
     const teamTickets = tickets.filter(t => (t.teamName ?? '') === team)
-    for (const category of ['Bug', 'Feedback'] as const) {
-      const catTickets = teamTickets.filter(t =>
-        category === 'Bug' ? t.category === 'Bug' : t.category !== 'Bug',
-      )
-      if (catTickets.length === 0) continue
-      if (catTickets.length <= MAX_POOL) {
-        pools.push({ tickets: catTickets, category })
-      } else {
-        // Too large — split by feature to keep pools manageable
-        const features = [...new Set(catTickets.map(t => t.featureName ?? ''))]
-        for (const feature of features) {
-          const ft = catTickets.filter(t => (t.featureName ?? '') === feature)
-          if (ft.length > 0) pools.push({ tickets: ft, category })
+    const features = [...new Set(teamTickets.map(t => t.featureName ?? ''))]
+    for (const feature of features) {
+      const featureTickets = teamTickets.filter(t => (t.featureName ?? '') === feature)
+      for (const category of ['Bug', 'Feedback'] as const) {
+        const catTickets = featureTickets.filter(t =>
+          category === 'Bug' ? t.category === 'Bug' : t.category !== 'Bug',
+        )
+        if (catTickets.length === 0) continue
+        // Chunk if a single feature-stream is unusually large
+        for (let start = 0; start < catTickets.length; start += MAX_POOL) {
+          pools.push({ tickets: catTickets.slice(start, start + MAX_POOL), category, teamName: team, featureName: feature })
         }
       }
     }
@@ -429,29 +432,33 @@ export async function clusterTickets(
   for (let i = 0; i < pools.length; i += CONCURRENCY) {
     const batch = pools.slice(i, i + CONCURRENCY)
     const results = await Promise.all(
-      batch.map(({ tickets: pool, category }) => {
+      batch.map(({ tickets: pool, category, teamName, featureName }) => {
         if (!apiKey) {
           return Promise.resolve(buildGroups(pool, pool.map((_, idx) => [idx]), category))
         }
-        return (async () => buildGroups(pool, await aiClusterOnly(pool, category, apiKey), category))()
+        return (async () => buildGroups(pool, await aiClusterOnly(pool, category, apiKey, featureName, teamName), category))()
       }),
     )
     rawGroups.push(...results.flat())
   }
 
-  // Phase 2: enrich ALL groups sequentially — guaranteed title + aiSummary on every card
+  // Drop singletons immediately — 1-report cards are excluded from the dashboard,
+  // so there's no point enriching or temperature-scoring them.
+  const actionableGroups = rawGroups.filter(g => g.frequency >= 2)
+
+  // Phase 2: enrich all actionable groups — guaranteed title + aiSummary on every card
   if (apiKey) {
-    await enrichAll(rawGroups, apiKey)
+    await enrichAll(actionableGroups, apiKey)
   }
 
   const now = Date.now()
-  const temps = computeTemperatures(rawGroups.map(g => ({
+  const temps = computeTemperatures(actionableGroups.map(g => ({
     frequency: g.frequency,
     impactScore: g.impactScore,
     recencyDays: (now - new Date(g.recency).getTime()) / (1000 * 60 * 60 * 24),
   })))
 
-  const result: InsightGroup[] = rawGroups.map((g, i) => ({
+  const result: InsightGroup[] = actionableGroups.map((g, i) => ({
     ...g,
     temperatureScore: temps[i].temperatureScore,
     temperature: temps[i].temperature,
