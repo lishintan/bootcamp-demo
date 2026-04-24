@@ -386,6 +386,93 @@ function buildGroups(
   })
 }
 
+// ─── Cross-feature merge (Pass 2) ────────────────────────────────────────────
+
+// Combines tickets from multiple groups into one, preserving all reports and Jira links.
+function mergeGroupSet(
+  groupsToMerge: Omit<InsightGroup, 'temperatureScore' | 'temperature'>[],
+  category: 'Bug' | 'Feedback',
+): Omit<InsightGroup, 'temperatureScore' | 'temperature'> {
+  const allTickets = groupsToMerge.flatMap(g => g.tickets)
+  const rep = [...allTickets].sort((a, b) => (b.impactScore ?? 0) - (a.impactScore ?? 0))[0]
+  const mostRecent = allTickets.reduce((best, t) =>
+    new Date(t.updated ?? t.created) > new Date(best.updated ?? best.created) ? t : best,
+  )
+  const sources = [...new Set(allTickets.flatMap(t => t.labels))].filter((s): s is string => typeof s === 'string')
+  const impactScores = allTickets.map(t => t.impactScore).filter((s): s is number => typeof s === 'number')
+  const avgImpact = impactScores.length > 0 ? impactScores.reduce((a, b) => a + b, 0) / impactScores.length : 0
+  const featureCount = new Map<string, number>()
+  for (const t of allTickets) featureCount.set(t.featureName ?? '', (featureCount.get(t.featureName ?? '') ?? 0) + 1)
+  const dominantFeature = [...featureCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? ''
+
+  return {
+    id: rep.key,
+    representativeTicket: rep,
+    tickets: allTickets,
+    frequency: allTickets.length,
+    category,
+    teamName: rep.teamName ?? '',
+    featureName: dominantFeature,
+    sources,
+    impactScore: Math.round(avgImpact * 100) / 100,
+    recency: mostRecent.updated ?? mostRecent.created,
+    hook: generateHook(allTickets),
+    title: toTitleCase(rep.summary ?? ''), // placeholder — enrichAll overwrites
+    aiSummary: '',                          // placeholder — enrichAll overwrites
+    whyTag: classifyWhyTag(allTickets),
+  }
+}
+
+// Pass 2: given all groups for one team+category, find cross-feature groups that share the
+// same root cause and merge them. Sends only titles (not raw tickets) so the AI call is cheap.
+async function crossFeatureMerge(
+  groups: Omit<InsightGroup, 'temperatureScore' | 'temperature'>[],
+  category: 'Bug' | 'Feedback',
+  apiKey: string,
+  teamName: string,
+): Promise<Omit<InsightGroup, 'temperatureScore' | 'temperature'>[]> {
+  if (groups.length <= 1) return groups
+
+  const lines = groups
+    .map((g, i) => `[${i}] [${g.featureName || 'General'}] ${g.title} (${g.frequency} report${g.frequency !== 1 ? 's' : ''})`)
+    .join('\n')
+
+  try {
+    const raw = await callGemini(
+      apiKey,
+      `You are a product analyst identifying cross-feature issues for a PM dashboard.
+
+These are already-clustered groups of ${category === 'Bug' ? 'bug reports' : 'user feedback'} from the "${teamName}" team, one group per feature stream. Find groups from DIFFERENT features that share the SAME root problem and should become one insight card.
+
+MERGE groups where:
+✓ Different features report the same underlying bug or the same user pain point
+✓ The root cause is clearly shared (same broken system, same friction point)
+✗ Do NOT merge groups that are only topically related but have different root causes
+✗ Do NOT merge groups that are already from the same feature
+
+${lines}
+
+Return ONLY a JSON array of index arrays. Groups that should NOT be merged each get their own single-element array. Every index 0-${groups.length - 1} must appear exactly once:
+[[0,2],[1],[3,4]]`,
+      Math.min(200 * groups.length, 2048),
+    )
+
+    const text = raw.replace(/```(?:json)?\n?/g, '').replace(/```/g, '').trim()
+    const match = text.match(/\[[\s\S]*\]/)
+    if (!match) {
+      console.error('[crossFeatureMerge] Could not parse response — keeping groups as-is')
+      return groups
+    }
+    const assignments = normaliseClusterResult(JSON.parse(match[0]) as number[][], groups.length)
+    return assignments.map(idxArr =>
+      idxArr.length === 1 ? groups[idxArr[0]] : mergeGroupSet(idxArr.map(i => groups[i]), category),
+    )
+  } catch (err) {
+    console.error('[crossFeatureMerge] Exception — keeping groups as-is:', err)
+    return groups
+  }
+}
+
 // ─── Main clustering function ─────────────────────────────────────────────────
 
 const clusterCache = new Map<string, InsightGroup[]>()
@@ -442,9 +529,41 @@ export async function clusterTickets(
     rawGroups.push(...results.flat())
   }
 
-  // Drop singletons immediately — 1-report cards are excluded from the dashboard,
-  // so there's no point enriching or temperature-scoring them.
-  const actionableGroups = rawGroups.filter(g => g.frequency >= 2)
+  // Phase 2: cross-feature merge — pool rawGroups by team+category and ask AI which
+  // groups from different features share the same root cause. Merging combines all ticket
+  // arrays so report counts and Jira links are fully preserved.
+  let phase2Groups = rawGroups
+  if (apiKey) {
+    type MergeJob = { teamName: string; category: 'Bug' | 'Feedback'; groups: typeof rawGroups }
+    const mergeJobs: MergeJob[] = []
+    const teamNames = [...new Set(rawGroups.map(g => g.teamName))]
+    for (const team of teamNames) {
+      for (const cat of ['Bug', 'Feedback'] as const) {
+        const slice = rawGroups.filter(g => g.teamName === team && g.category === cat)
+        if (slice.length > 1) mergeJobs.push({ teamName: team, category: cat, groups: slice })
+      }
+    }
+
+    const mergedSlices: typeof rawGroups[] = []
+    for (let i = 0; i < mergeJobs.length; i += CONCURRENCY) {
+      const batch = mergeJobs.slice(i, i + CONCURRENCY)
+      const results = await Promise.all(
+        batch.map(({ groups, category, teamName }) =>
+          crossFeatureMerge(groups, category, apiKey, teamName),
+        ),
+      )
+      mergedSlices.push(...results)
+    }
+
+    // Rebuild phase2Groups: teams/categories that had a merge job use the merged result;
+    // any that were skipped (single group) pass through unchanged.
+    const coveredKeys = new Set(mergeJobs.map(j => `${j.teamName}||${j.category}`))
+    const passthrough = rawGroups.filter(g => !coveredKeys.has(`${g.teamName}||${g.category}`))
+    phase2Groups = [...passthrough, ...mergedSlices.flat()]
+  }
+
+  // Drop singletons after both passes — 1-report cards are excluded from the dashboard.
+  const actionableGroups = phase2Groups.filter(g => g.frequency >= 2)
 
   // Phase 2: enrich all actionable groups — guaranteed title + aiSummary on every card
   if (apiKey) {
