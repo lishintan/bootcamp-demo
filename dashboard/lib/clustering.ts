@@ -286,7 +286,7 @@ async function enrichBatch(batch: InsightGroup[], apiKey: string): Promise<Insig
     const text = await callGemini(
       apiKey,
       `You are a product analyst writing insight cards for a PM dashboard. For each of the ${batch.length} groups below, write:
-- title: 6-10 words, clear and specific (e.g. "Streak counter resets after completing daily activities")
+- title: 6-10 words in Title Case (capitalise every word except articles/prepositions), clear and specific (e.g. "Streak Counter Resets After Completing Daily Activities")
 - summary: 2 sentences. First: what users are experiencing (use the actual feedback). Second: why this matters to the business.
 
 ${batchContent}
@@ -322,6 +322,87 @@ async function enrichWithAI(groups: InsightGroup[]): Promise<InsightGroup[]> {
   return results.flat()
 }
 
+// ─── Global second-pass merge ────────────────────────────────────────────────
+// After per-pool clustering, groups from different pools can still represent the
+// same user problem. This pass sends all group titles to Gemini and merges duplicates.
+
+function mergeGroupSet(toMerge: InsightGroup[]): InsightGroup {
+  const sorted = [...toMerge].sort((a, b) => b.frequency - a.frequency)
+  const allTickets = sorted.flatMap(g => g.tickets)
+
+  const featureCount = new Map<string, number>()
+  for (const t of allTickets) featureCount.set(t.featureName ?? '', (featureCount.get(t.featureName ?? '') ?? 0) + 1)
+  const dominantFeature = [...featureCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? ''
+
+  const allImpact = allTickets.map(t => t.impactScore).filter((s): s is number => s !== null)
+  const avgImpact = allImpact.length > 0 ? allImpact.reduce((a, b) => a + b, 0) / allImpact.length : 0
+  const mostRecent = allTickets.reduce((best, t) =>
+    new Date(t.updated ?? t.created) > new Date(best.updated ?? best.created) ? t : best,
+  )
+  const primary = sorted[0]
+
+  return {
+    ...primary,
+    tickets: allTickets,
+    frequency: allTickets.length,
+    featureName: dominantFeature,
+    sources: [...new Set(allTickets.flatMap(t => t.labels))].filter(Boolean),
+    impactScore: Math.round(avgImpact * 100) / 100,
+    recency: mostRecent.updated ?? mostRecent.created,
+    hook: generateHook(allTickets),
+    whyTag: classifyWhyTag(allTickets),
+  }
+}
+
+async function crossPoolMerge(groups: InsightGroup[], apiKey: string): Promise<InsightGroup[]> {
+  if (groups.length <= 1) return groups
+
+  const lines = groups
+    .map((g, i) => `[${i}] ${g.title || g.representativeTicket.summary} (${g.frequency} reports)`)
+    .join('\n')
+
+  try {
+    const raw = await callGemini(
+      apiKey,
+      `These are insight groups from a product feedback dashboard. Some groups represent the SAME user problem but were clustered separately. Identify which groups should be merged.
+
+${lines}
+
+Return a JSON array where each element is a list of indices to merge. Every index 0-${groups.length - 1} must appear exactly once.
+Only merge groups that clearly represent the same user frustration or need.
+Example: [[0,3],[1],[2,4,5],[6]]`,
+      Math.min(groups.length * 15 + 500, 8192),
+    )
+
+    const text = raw.replace(/```(?:json)?\n?/g, '').replace(/```/g, '').trim()
+    const match = text.match(/\[[\s\S]*\]/)
+    if (!match) {
+      console.error('[merge] Could not parse response:', raw.slice(0, 200))
+      return groups
+    }
+
+    const clusters = JSON.parse(match[0]) as number[][]
+    const seen = new Set<number>()
+    const result: InsightGroup[] = []
+
+    for (const cluster of clusters) {
+      const valid = cluster.filter(i => typeof i === 'number' && i >= 0 && i < groups.length && !seen.has(i))
+      if (valid.length === 0) continue
+      valid.forEach(i => seen.add(i))
+      result.push(valid.length === 1 ? groups[valid[0]] : mergeGroupSet(valid.map(i => groups[i])))
+    }
+
+    for (let i = 0; i < groups.length; i++) {
+      if (!seen.has(i)) result.push(groups[i])
+    }
+
+    return result
+  } catch (err) {
+    console.error('[merge] Exception:', err)
+    return groups
+  }
+}
+
 // ─── Pool clustering ──────────────────────────────────────────────────────────
 
 async function clusterPool(
@@ -335,10 +416,17 @@ async function clusterPool(
 
   return clusterIndices.map(indices => {
     const groupTickets = indices.map(i => tickets[i])
-    groupTickets.sort((a, b) => new Date(a.created).getTime() - new Date(b.created).getTime())
-    const rep = groupTickets[0]
+
+    // Use highest-impact ticket as representative
+    const rep = [...groupTickets].sort((a, b) => (b.impactScore ?? 0) - (a.impactScore ?? 0))[0]
+
+    // Use the most common featureName so the group reflects the majority, not just one ticket
+    const featureCount = new Map<string, number>()
+    for (const t of groupTickets) featureCount.set(t.featureName ?? '', (featureCount.get(t.featureName ?? '') ?? 0) + 1)
+    const dominantFeature = [...featureCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? ''
+
     const mostRecent = groupTickets.reduce((best, t) =>
-      new Date(t.created) > new Date(best.created) ? t : best,
+      new Date(t.updated ?? t.created) > new Date(best.updated ?? best.created) ? t : best,
     )
     const sources = [...new Set(groupTickets.flatMap(t => t.labels))].filter(Boolean)
     const impactScores = groupTickets.map(t => t.impactScore).filter((s): s is number => s !== null)
@@ -351,10 +439,10 @@ async function clusterPool(
       frequency: groupTickets.length,
       category,
       teamName: rep.teamName ?? '',
-      featureName: rep.featureName ?? '',
+      featureName: dominantFeature,
       sources,
       impactScore: Math.round(avgImpact * 100) / 100,
-      recency: mostRecent.created,
+      recency: mostRecent.updated ?? mostRecent.created,
       temperature: 'Cold' as const,
       temperatureScore: 0,
       hook: generateHook(groupTickets),
@@ -425,7 +513,19 @@ export async function clusterTickets(
 
   result.sort((a, b) => b.temperatureScore - a.temperatureScore)
 
-  const finalResult = apiKey ? await enrichWithAI(result) : result
+  // Second pass: merge groups across pools that represent the same user problem
+  const merged = apiKey ? await crossPoolMerge(result, apiKey) : result
+
+  // Recompute temperatures after merge (frequencies changed)
+  const mergedTemps = computeTemperatures(merged.map(g => ({
+    frequency: g.frequency,
+    impactScore: g.impactScore,
+    recencyDays: (now - new Date(g.recency).getTime()) / (1000 * 60 * 60 * 24),
+  })))
+  const retemped = merged.map((g, i) => ({ ...g, ...mergedTemps[i] }))
+  retemped.sort((a, b) => b.temperatureScore - a.temperatureScore)
+
+  const finalResult = apiKey ? await enrichWithAI(retemped) : retemped
   clusterCache.set(cacheKey, finalResult)
   return finalResult
 }
