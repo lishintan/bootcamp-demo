@@ -162,23 +162,22 @@ async function aiClusterGlobal(
       apiKey,
       `You are grouping product ${category === 'Bug' ? 'bug reports' : 'feedback'} for a PM dashboard.
 
-Read each ticket's title AND the description below it. Understand the specific problem each user is experiencing before grouping.
+Read every ticket's title AND description before making any grouping decision.
 
-Group tickets that describe the EXACT SAME specific user problem — i.e. different users hitting the same issue or making the same request.
+GROUP BY ROOT PRODUCT PROBLEM — the problem a product team would fix together in a single sprint. Different symptoms, platforms, or causes of the same broken feature belong in ONE group.
 
-RULES:
-1. Read descriptions carefully. Titles alone can be misleading.
-2. Group by the SPECIFIC problem, not the general area:
-   - "Streak resets after one missed day" + "Lost 90-day streak due to system outage" → same problem (streak lost unfairly) → ONE group
-   - "Can't jump to a specific lesson video" + "Can't find which quests are incomplete" → different problems → SEPARATE groups
-   - "App crashes on launch" + "App freezes mid-video" → different failure modes → SEPARATE groups
-3. Do NOT group tickets just because they share a keyword (e.g. "navigation", "loading", "discovery").
-4. Different user goals = different groups, even if they sound related.
+EXAMPLES:
+✓ MERGE: "Streak resets on Android after meditation" + "Streak counter drops to zero intermittently" + "Timezone bug causes streak loss" → all the same root problem: streak tracking is unreliable
+✓ MERGE: "Quest lessons not loading on iOS" + "Videos blank on iPad" + "Duality Quest content won't play" → same root problem: quest content not loading
+✗ SEPARATE: "Streak resets" vs "App crashes on launch" → different features, different fixes
+✗ SEPARATE: "Can't find incomplete quests" vs "Want to jump directly to a lesson video" → different user goals
+
+RULE: Ask yourself — would the same product team fix all these tickets together? If yes, ONE group. If they need different people or different fixes, separate groups.
 
 ${lines}
 
 Output ONLY a JSON array of arrays of 0-based indices. Every index 0-${tickets.length - 1} must appear exactly once.
-Example: [[0,3],[1],[2,4,5],[6,7],[8]]`,
+Example: [[0,3,7],[1],[2,4],[5,6,8],[9]]`,
       8192,
     )
 
