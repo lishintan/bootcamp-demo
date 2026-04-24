@@ -42,7 +42,6 @@ const WHY_TAG_KEYWORDS: Record<'Friction' | 'Wishlist' | 'Retention' | 'Revenue'
   ],
 }
 
-const ENRICH_BATCH_SIZE = 10
 
 // ─── TF-IDF (silent fallback when AI call fails) ──────────────────────────────
 
@@ -142,13 +141,23 @@ async function callGemini(apiKey: string, prompt: string, maxTokens: number): Pr
   return data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
 }
 
-async function aiClusterGlobal(
+interface ClusteredGroup {
+  indices: number[]
+  title: string
+  summary: string
+}
+
+// One API call per pool: cluster tickets AND generate title + summary simultaneously.
+// This eliminates a separate enrichment pass and the rate limiting that came with it.
+async function aiClusterAndEnrich(
   tickets: JiraTicket[],
   category: 'Bug' | 'Feedback',
   apiKey: string,
-): Promise<number[][]> {
+): Promise<ClusteredGroup[]> {
   if (tickets.length === 0) return []
-  if (tickets.length === 1) return [[0]]
+  if (tickets.length === 1) {
+    return [{ indices: [0], title: toTitleCase(tickets[0].summary), summary: '' }]
+  }
 
   const lines = tickets
     .map((t, i) => {
@@ -160,39 +169,54 @@ async function aiClusterGlobal(
   try {
     const raw = await callGemini(
       apiKey,
-      `You are grouping product ${category === 'Bug' ? 'bug reports' : 'feedback'} for a PM dashboard.
+      `You are a product analyst grouping ${category === 'Bug' ? 'bug reports' : 'feedback'} for a PM dashboard.
 
-Read every ticket's title AND description before making any grouping decision.
+Read every ticket's title AND description before deciding groups.
 
-GROUP BY ROOT PRODUCT PROBLEM — the problem a product team would fix together in a single sprint. Different symptoms, platforms, or causes of the same broken feature belong in ONE group.
+GROUP BY ROOT PRODUCT PROBLEM — the problem a product team would fix together in a single sprint.
+✓ MERGE: "Streak resets on Android" + "Streak drops to zero intermittently" + "Timezone causes streak loss" → ONE group (streak tracking is unreliable)
+✓ MERGE: "Quest lessons not loading on iOS" + "Videos blank on iPad" → ONE group (quest content not loading)
+✗ SEPARATE: "Streak resets" vs "App crashes on launch" → different features
+✗ SEPARATE: "Can't find incomplete quests" vs "Jump directly to lesson video" → different user goals
 
-EXAMPLES:
-✓ MERGE: "Streak resets on Android after meditation" + "Streak counter drops to zero intermittently" + "Timezone bug causes streak loss" → all the same root problem: streak tracking is unreliable
-✓ MERGE: "Quest lessons not loading on iOS" + "Videos blank on iPad" + "Duality Quest content won't play" → same root problem: quest content not loading
-✗ SEPARATE: "Streak resets" vs "App crashes on launch" → different features, different fixes
-✗ SEPARATE: "Can't find incomplete quests" vs "Want to jump directly to a lesson video" → different user goals
-
-RULE: Ask yourself — would the same product team fix all these tickets together? If yes, ONE group. If they need different people or different fixes, separate groups.
+For each group also write:
+- title: 6-10 words in Title Case that describes ALL tickets in the group (not just one)
+- summary: exactly 2 sentences — first: what users experience across ALL reports; second: why it matters to the business
 
 ${lines}
 
-Output ONLY a JSON array of arrays of 0-based indices. Every index 0-${tickets.length - 1} must appear exactly once.
-Example: [[0,3,7],[1],[2,4],[5,6,8],[9]]`,
+Return ONLY a JSON array. Every index 0-${tickets.length - 1} must appear exactly once:
+[{"group":[0,3,7],"title":"Streak Tracking Unreliable Across Sessions","summary":"Users report..."},{"group":[1],"title":"...","summary":"..."}]`,
       8192,
     )
 
     const text = raw.replace(/```(?:json)?\n?/g, '').replace(/```/g, '').trim()
     const match = text.match(/\[[\s\S]*\]/)
     if (!match) {
-      console.error('[cluster] Could not parse global response — TF-IDF fallback:', raw.slice(0, 200))
-      return tfidfFallback(tickets)
+      console.error('[cluster] Could not parse combined response — TF-IDF fallback:', raw.slice(0, 300))
+      return tfidfFallback(tickets).map(idxArr => ({
+        indices: idxArr,
+        title: toTitleCase(tickets[idxArr[0]]?.summary ?? ''),
+        summary: '',
+      }))
     }
 
-    const parsed = JSON.parse(match[0]) as number[][]
-    return normaliseClusterResult(parsed, tickets.length)
+    const parsed = JSON.parse(match[0]) as { group?: number[]; title?: string; summary?: string }[]
+    const rawIndices = parsed.map(p => p.group ?? [])
+    const normalised = normaliseClusterResult(rawIndices, tickets.length)
+
+    return normalised.map((idxArr, i) => ({
+      indices: idxArr,
+      title: toTitleCase(parsed[i]?.title?.trim() || tickets[idxArr[0]]?.summary || ''),
+      summary: parsed[i]?.summary?.trim() || '',
+    }))
   } catch (err) {
-    console.error('[cluster] Global cluster exception — TF-IDF fallback:', err)
-    return tfidfFallback(tickets)
+    console.error('[cluster] Combined cluster+enrich exception — TF-IDF fallback:', err)
+    return tfidfFallback(tickets).map(idxArr => ({
+      indices: idxArr,
+      title: toTitleCase(tickets[idxArr[0]]?.summary ?? ''),
+      summary: '',
+    }))
   }
 }
 
@@ -294,70 +318,14 @@ function computeTemperatures(rawGroups: { frequency: number; impactScore: number
   }))
 }
 
-// ─── AI enrichment (titles + summaries) ──────────────────────────────────────
-
-async function enrichBatch(batch: InsightGroup[], apiKey: string): Promise<InsightGroup[]> {
-  const batchContent = batch.map((g, i) => {
-    const lines = g.tickets.slice(0, 5).map(t => {
-      const desc = t.description?.trim().slice(0, 300) ?? ''
-      return `  - ${t.summary}${desc ? `\n    "${desc}"` : ''}`
-    }).join('\n')
-    return `[${i + 1}] ${g.featureName} · ${g.category} · ${g.tickets.length} reports:\n${lines}`
-  }).join('\n\n')
-
-  try {
-    const text = await callGemini(
-      apiKey,
-      `You are a product analyst writing insight cards for a PM dashboard. For each of the ${batch.length} groups below, write:
-- title: 6-10 words in Title Case (capitalise every word except articles/prepositions), clear and specific (e.g. "Streak Counter Resets After Completing Daily Activities")
-- summary: 2 sentences. First: what users are experiencing (use the actual feedback). Second: why this matters to the business.
-
-${batchContent}
-
-Return a JSON array of exactly ${batch.length} objects:
-[{"title":"...","summary":"..."}, ...]`,
-      Math.min(250 * batch.length, 3000),
-    )
-
-    const match = text.match(/\[[\s\S]*\]/)
-    if (!match) {
-      console.error('[enrich] No JSON array in response:', text.slice(0, 300))
-      return batch
-    }
-    const parsed = JSON.parse(match[0]) as { title?: string; summary?: string }[]
-    return batch.map((g, i) => ({
-      ...g,
-      title: toTitleCase(parsed[i]?.title?.trim() || g.title),
-      aiSummary: parsed[i]?.summary?.trim() || g.aiSummary,
-    }))
-  } catch (err) {
-    console.error('[enrich] Exception:', err)
-    return batch
-  }
-}
-
-async function enrichWithAI(groups: InsightGroup[]): Promise<InsightGroup[]> {
-  const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) return groups
-  const batches: InsightGroup[][] = []
-  for (let i = 0; i < groups.length; i += ENRICH_BATCH_SIZE) batches.push(groups.slice(i, i + ENRICH_BATCH_SIZE))
-  // Sequential — parallel calls trigger rate limiting and silently return empty aiSummary
-  const enriched: InsightGroup[] = []
-  for (const batch of batches) {
-    const result = await enrichBatch(batch, apiKey)
-    enriched.push(...result)
-  }
-  return enriched
-}
-
-// ─── Build groups from cluster indices ───────────────────────────────────────
+// ─── Build groups from combined cluster+enrich results ───────────────────────
 
 function buildGroups(
   tickets: JiraTicket[],
-  indices: number[][],
+  clustered: ClusteredGroup[],
   category: 'Bug' | 'Feedback',
 ): Omit<InsightGroup, 'temperatureScore' | 'temperature'>[] {
-  return indices.map((idxArr: number[]) => {
+  return clustered.map(({ indices: idxArr, title, summary }) => {
     const groupTickets = idxArr.map((i: number) => tickets[i])
     const rep = [...groupTickets].sort((a: JiraTicket, b: JiraTicket) => (b.impactScore ?? 0) - (a.impactScore ?? 0))[0]
 
@@ -386,8 +354,8 @@ function buildGroups(
       temperature: 'Cold' as const,
       temperatureScore: 0,
       hook: generateHook(groupTickets),
-      title: toTitleCase(rep.summary ?? ''),
-      aiSummary: '',
+      title: title || toTitleCase(rep.summary ?? ''),
+      aiSummary: summary,
       whyTag: classifyWhyTag(groupTickets),
     }
   })
@@ -432,31 +400,35 @@ export async function clusterTickets(
     const batch = pools.slice(i, i + CONCURRENCY)
     const results = await Promise.all(
       batch.map(({ tickets: pool, category }) => {
-        if (!apiKey) return Promise.resolve(buildGroups(pool, pool.map((_: JiraTicket, idx: number) => [idx]), category))
-        return aiClusterGlobal(pool, category, apiKey).then(indices => buildGroups(pool, indices, category))
+        if (!apiKey) {
+          const fallback = pool.map((_: JiraTicket, idx: number): ClusteredGroup => ({
+            indices: [idx],
+            title: toTitleCase(pool[idx]?.summary ?? ''),
+            summary: '',
+          }))
+          return Promise.resolve(buildGroups(pool, fallback, category))
+        }
+        return aiClusterAndEnrich(pool, category, apiKey).then(clustered => buildGroups(pool, clustered, category))
       }),
     )
     rawGroups.push(...results.flat())
   }
 
-  const allGroups = rawGroups
   const now = Date.now()
-  const temps = computeTemperatures(allGroups.map(g => ({
+  const temps = computeTemperatures(rawGroups.map(g => ({
     frequency: g.frequency,
     impactScore: g.impactScore,
     recencyDays: (now - new Date(g.recency).getTime()) / (1000 * 60 * 60 * 24),
   })))
 
-  const result: InsightGroup[] = allGroups.map((g, i) => ({
+  const result: InsightGroup[] = rawGroups.map((g, i) => ({
     ...g,
     temperatureScore: temps[i].temperatureScore,
     temperature: temps[i].temperature,
   }))
 
   result.sort((a, b) => b.temperatureScore - a.temperatureScore)
-
-  const finalResult = apiKey ? await enrichWithAI(result) : result
-  clusterCache.set(cacheKey, finalResult)
-  return finalResult
+  clusterCache.set(cacheKey, result)
+  return result
 }
 
