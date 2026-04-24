@@ -342,8 +342,13 @@ async function enrichWithAI(groups: InsightGroup[]): Promise<InsightGroup[]> {
   if (!apiKey) return groups
   const batches: InsightGroup[][] = []
   for (let i = 0; i < groups.length; i += ENRICH_BATCH_SIZE) batches.push(groups.slice(i, i + ENRICH_BATCH_SIZE))
-  const results = await Promise.all(batches.map(b => enrichBatch(b, apiKey)))
-  return results.flat()
+  // Sequential — parallel calls trigger rate limiting and silently return empty aiSummary
+  const enriched: InsightGroup[] = []
+  for (const batch of batches) {
+    const result = await enrichBatch(batch, apiKey)
+    enriched.push(...result)
+  }
+  return enriched
 }
 
 // ─── Build groups from cluster indices ───────────────────────────────────────
@@ -403,24 +408,23 @@ export async function clusterTickets(
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) console.warn('[clustering] No GEMINI_API_KEY — grouping by TF-IDF only')
 
-  // Pool strictly by team → feature → category, then cluster by meaning within each pool.
-  // Team boundaries are never crossed. Feature boundaries are never crossed.
+  // Pool by team (strict) → category only. Never split by feature — tickets about the
+  // same user problem are often tagged to different features (e.g. "streak reset" can be
+  // tagged "Meditations" or "Streaks & Progress" depending on who filed it). Splitting by
+  // feature puts those tickets in separate pools where they can never be grouped together.
+  // The dominant featureName of each resulting group is shown on the card.
   type TicketPool = { tickets: JiraTicket[]; category: 'Bug' | 'Feedback' }
   const pools: TicketPool[] = []
 
   const teams = [...new Set(tickets.map(t => t.teamName ?? ''))]
   for (const team of teams) {
     const teamTickets = tickets.filter(t => (t.teamName ?? '') === team)
-    const features = [...new Set(teamTickets.map(t => t.featureName ?? ''))]
-    for (const feature of features) {
-      const featureTickets = teamTickets.filter(t => (t.featureName ?? '') === feature)
-      const bugs = featureTickets.filter(t => t.category === 'Bug')
-      const feedback = featureTickets.filter(t => t.category === 'Feedback')
-      const other = featureTickets.filter(t => t.category !== 'Bug' && t.category !== 'Feedback')
-      if (bugs.length > 0) pools.push({ tickets: bugs, category: 'Bug' })
-      if (feedback.length > 0) pools.push({ tickets: feedback, category: 'Feedback' })
-      if (other.length > 0) pools.push({ tickets: other, category: 'Feedback' })
-    }
+    const bugs = teamTickets.filter(t => t.category === 'Bug')
+    const feedback = teamTickets.filter(t => t.category === 'Feedback')
+    const other = teamTickets.filter(t => t.category !== 'Bug' && t.category !== 'Feedback')
+    if (bugs.length > 0) pools.push({ tickets: bugs, category: 'Bug' })
+    if (feedback.length > 0) pools.push({ tickets: feedback, category: 'Feedback' })
+    if (other.length > 0) pools.push({ tickets: other, category: 'Feedback' })
   }
 
   const CONCURRENCY = 8
