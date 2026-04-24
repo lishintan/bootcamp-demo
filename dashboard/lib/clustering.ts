@@ -123,6 +123,26 @@ function normaliseClusterResult(parsed: number[][], n: number): number[][] {
   return result
 }
 
+async function callGemini(apiKey: string, prompt: string, maxTokens: number): Promise<string> {
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: maxTokens },
+      }),
+    },
+  )
+  if (!resp.ok) {
+    const err = await resp.text()
+    throw new Error(`Gemini ${resp.status}: ${err.slice(0, 200)}`)
+  }
+  const data = await resp.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] }
+  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+}
+
 async function aiClusterPool(
   tickets: JiraTicket[],
   category: 'Bug' | 'Feedback',
@@ -138,20 +158,9 @@ async function aiClusterPool(
     .join('\n')
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: Math.min(tickets.length * 40 + 1000, 8192),
-        messages: [
-          {
-            role: 'user',
-            content: `Group these ${tickets.length} product ${category === 'Bug' ? 'bug' : 'feedback'} tickets by user-facing problem. Two tickets belong in the same group if a user would describe them as the same issue — even if the technical details differ.
+    const raw = await callGemini(
+      apiKey,
+      `Group these ${tickets.length} product ${category === 'Bug' ? 'bug' : 'feedback'} tickets by user-facing problem. Two tickets belong in the same group if a user would describe them as the same issue — even if the technical details differ.
 
 For bugs: "streak not credited", "streak resets", "sessions not registering affecting streak" are ALL the same user problem → one group.
 For feedback: "add dark mode" and "app needs dark theme" are the same request → one group. But "add dark mode" and "improve navigation" are different → separate groups.
@@ -160,23 +169,13 @@ ${lines}
 
 Output ONLY a JSON array of arrays of indices. No explanation, no markdown.
 Example: [[0,3],[1,4],[2],[5,6]]`,
-          },
-        ],
-      }),
-    })
+      Math.min(tickets.length * 40 + 1000, 8192),
+    )
 
-    if (!resp.ok) {
-      console.error(`[cluster] Anthropic API error ${resp.status} — falling back to TF-IDF`)
-      return tfidfFallback(tickets)
-    }
-
-    const data = await resp.json() as { content: { type: string; text: string }[] }
-    const raw = data.content?.[0]?.text ?? ''
-    // Strip markdown code fences if model adds them
     const text = raw.replace(/```(?:json)?\n?/g, '').replace(/```/g, '').trim()
     const match = text.match(/\[[\s\S]*\]/)
     if (!match) {
-      console.error('[cluster] Could not parse AI response — falling back to TF-IDF. Response:', raw.slice(0, 200))
+      console.error('[cluster] Could not parse Gemini response — falling back to TF-IDF. Response:', raw.slice(0, 200))
       return tfidfFallback(tickets)
     }
 
@@ -280,15 +279,9 @@ async function enrichBatch(batch: InsightGroup[], apiKey: string): Promise<Insig
   }).join('\n\n')
 
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 400 * batch.length,
-        messages: [{
-          role: 'user',
-          content: `You are a product analyst writing insight cards for a PM dashboard. For each of the ${batch.length} groups below, write:
+    const text = await callGemini(
+      apiKey,
+      `You are a product analyst writing insight cards for a PM dashboard. For each of the ${batch.length} groups below, write:
 - title: 6-10 words, clear and specific (e.g. "Streak counter resets after completing daily activities")
 - summary: 2 sentences. First: what users are experiencing (use the actual feedback). Second: why this matters to the business.
 
@@ -296,15 +289,9 @@ ${batchContent}
 
 Return a JSON array of exactly ${batch.length} objects:
 [{"title":"...","summary":"..."}, ...]`,
-        }],
-      }),
-    })
-    if (!resp.ok) {
-      console.error(`[enrich] API error ${resp.status}:`, await resp.text())
-      return batch
-    }
-    const data = await resp.json() as { content: { type: string; text: string }[] }
-    const text = data.content?.[0]?.text ?? ''
+      400 * batch.length,
+    )
+
     const match = text.match(/\[[\s\S]*\]/)
     if (!match) {
       console.error('[enrich] No JSON array in response:', text.slice(0, 300))
@@ -323,7 +310,7 @@ Return a JSON array of exactly ${batch.length} objects:
 }
 
 async function enrichWithAI(groups: InsightGroup[]): Promise<InsightGroup[]> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
+  const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) return groups
   const toEnrich = groups.slice(0, ENRICH_TOP_N)
   const rest = groups.slice(ENRICH_TOP_N)
@@ -387,9 +374,9 @@ export async function clusterTickets(
   const cacheKey = `${tickets.length}:${aiProvider}`
   if (clusterCache.has(cacheKey)) return clusterCache.get(cacheKey)!
 
-  const apiKey = process.env.ANTHROPIC_API_KEY
+  const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
-    console.warn('[clustering] No ANTHROPIC_API_KEY — grouping by TF-IDF only')
+    console.warn('[clustering] No GEMINI_API_KEY — grouping by TF-IDF only')
     // Fall through: aiClusterPool will use tfidfFallback internally when apiKey is missing
   }
 

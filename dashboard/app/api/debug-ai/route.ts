@@ -1,12 +1,12 @@
 export const dynamic = 'force-dynamic'
 
 export async function GET() {
-  const apiKey = process.env.ANTHROPIC_API_KEY
+  const apiKey = process.env.GEMINI_API_KEY
   const redisUrl = process.env.UPSTASH_REDIS_REST_URL
   const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN
 
   const envCheck = {
-    ANTHROPIC_API_KEY: apiKey ? `set (${apiKey.slice(0, 8)}...)` : 'MISSING',
+    GEMINI_API_KEY: apiKey ? `set (${apiKey.slice(0, 8)}...)` : 'MISSING',
     UPSTASH_REDIS_REST_URL: redisUrl ? 'set' : 'MISSING',
     UPSTASH_REDIS_REST_TOKEN: redisToken ? 'set' : 'MISSING',
   }
@@ -18,23 +18,22 @@ export async function GET() {
   // Make a minimal real API call to verify the key works
   let apiTest: Record<string, unknown>
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'Reply with just the word: working' }] }],
+          generationConfig: { maxOutputTokens: 20 },
+        }),
       },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 20,
-        messages: [{ role: 'user', content: 'Reply with just the word: working' }],
-      }),
-    })
+    )
     const status = resp.status
     const data = await resp.json() as Record<string, unknown>
     if (resp.ok) {
-      const content = (data as { content?: { text?: string }[] }).content?.[0]?.text ?? ''
+      const content = (data as { candidates?: { content?: { parts?: { text?: string }[] } }[] })
+        .candidates?.[0]?.content?.parts?.[0]?.text ?? ''
       apiTest = { status, ok: true, response: content }
     } else {
       apiTest = { status, ok: false, error: data }

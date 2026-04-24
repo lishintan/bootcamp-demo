@@ -8,7 +8,7 @@ export const maxDuration = 300
 
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
-const CLUSTER_CACHE_KEY = 'pid-clusters-v28'
+const CLUSTER_CACHE_KEY = 'pid-clusters-v29'
 const CLUSTER_CACHE_TTL = 86400 // 24 hours
 
 interface CachedPayload {
@@ -109,7 +109,7 @@ export async function GET(req: NextRequest) {
     const parkingLot = tickets.filter(t => t.status.toLowerCase() === 'parking lot').length
     const wontDo = tickets.filter(t => t.status.toLowerCase() === "won't do").length
 
-    const aiProvider = process.env.ANTHROPIC_API_KEY ? 'claude' : 'none'
+    const aiProvider = process.env.GEMINI_API_KEY ? 'gemini' : 'none'
     const clustered = await clusterTickets(tickets, aiProvider)
 
     // Remove groups where every ticket hasn't been updated in 18 months (stale/archived)
