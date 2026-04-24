@@ -4,11 +4,12 @@ import type { InsightGroup } from '@/lib/clustering'
 import type { NextRequest } from 'next/server'
 
 export const dynamic = 'force-dynamic'
+export const maxDuration = 300
 
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
-const CLUSTER_CACHE_KEY = 'pid-clusters-v26'
-const CLUSTER_CACHE_TTL = 3600
+const CLUSTER_CACHE_KEY = 'pid-clusters-v27'
+const CLUSTER_CACHE_TTL = 86400 // 24 hours
 
 interface CachedPayload {
   groups: InsightGroup[]
