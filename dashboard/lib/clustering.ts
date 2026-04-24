@@ -171,17 +171,18 @@ async function aiClusterAndEnrich(
       apiKey,
       `You are a product analyst grouping ${category === 'Bug' ? 'bug reports' : 'feedback'} for a PM dashboard.
 
-Read every ticket's title AND description before deciding groups.
+Read every ticket title AND description carefully before grouping.
 
-GROUP BY ROOT PRODUCT PROBLEM — the problem a product team would fix together in a single sprint.
-✓ MERGE: "Streak resets on Android" + "Streak drops to zero intermittently" + "Timezone causes streak loss" → ONE group (streak tracking is unreliable)
-✓ MERGE: "Quest lessons not loading on iOS" + "Videos blank on iPad" → ONE group (quest content not loading)
-✗ SEPARATE: "Streak resets" vs "App crashes on launch" → different features
-✗ SEPARATE: "Can't find incomplete quests" vs "Jump directly to lesson video" → different user goals
+GROUP tickets that describe the SAME specific broken behaviour or the SAME specific user request (~70% similar is enough):
+✓ MERGE: "Streak fails to log after timezone change" + "Streak resets to zero despite completing program" → same failure: streak tracking is unreliable
+✗ SEPARATE: "Streak resets" vs "Streak should be more forgiving / add streak shields" → different types: one is a bug, the other is a wishlist feature request
+✓ MERGE: "Video won't load on iOS" + "Blank screen when starting lesson on iPad" → same failure: video not loading
+✗ SEPARATE: "Video won't load" vs "Video quality is poor" → different problems even in same feature
+✗ SEPARATE: Keep tickets from clearly different features in their own groups
 
-For each group also write:
-- title: 6-10 words in Title Case that describes ALL tickets in the group (not just one)
-- summary: exactly 2 sentences — first: what users experience across ALL reports; second: why it matters to the business
+For each group write:
+- title: 6-10 words in Title Case describing the shared problem across ALL tickets in the group
+- summary: exactly 2 sentences — sentence 1: what users experience (based on all reports); sentence 2: business impact
 
 ${lines}
 
@@ -202,14 +203,26 @@ Return ONLY a JSON array. Every index 0-${tickets.length - 1} must appear exactl
     }
 
     const parsed = JSON.parse(match[0]) as { group?: number[]; title?: string; summary?: string }[]
-    const rawIndices = parsed.map(p => p.group ?? [])
-    const normalised = normaliseClusterResult(rawIndices, tickets.length)
 
-    return normalised.map((idxArr, i) => ({
-      indices: idxArr,
-      title: toTitleCase(parsed[i]?.title?.trim() || tickets[idxArr[0]]?.summary || ''),
-      summary: parsed[i]?.summary?.trim() || '',
-    }))
+    // Build a per-ticket metadata map BEFORE normalisation adds extra singletons.
+    // If we map by array index instead, normalised[i] won't align with parsed[i]
+    // whenever normaliseClusterResult inserts extra groups for uncovered tickets.
+    const ticketMeta = new Map<number, { title: string; summary: string }>()
+    for (const p of parsed) {
+      const meta = { title: toTitleCase(p.title?.trim() || ''), summary: p.summary?.trim() || '' }
+      for (const idx of (p.group ?? [])) ticketMeta.set(idx, meta)
+    }
+
+    const normalised = normaliseClusterResult(parsed.map(p => p.group ?? []), tickets.length)
+
+    return normalised.map(idxArr => {
+      const meta = ticketMeta.get(idxArr[0])
+      return {
+        indices: idxArr,
+        title: meta?.title || toTitleCase(tickets[idxArr[0]]?.summary || ''),
+        summary: meta?.summary || '',
+      }
+    })
   } catch (err) {
     console.error('[cluster] Combined cluster+enrich exception — TF-IDF fallback:', err)
     return tfidfFallback(tickets).map(idxArr => ({
@@ -375,23 +388,26 @@ export async function clusterTickets(
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) console.warn('[clustering] No GEMINI_API_KEY — grouping by TF-IDF only')
 
-  // Pool by team (strict) → category only. Never split by feature — tickets about the
-  // same user problem are often tagged to different features (e.g. "streak reset" can be
-  // tagged "Meditations" or "Streaks & Progress" depending on who filed it). Splitting by
-  // feature puts those tickets in separate pools where they can never be grouped together.
-  // The dominant featureName of each resulting group is shown on the card.
+  // Pool strictly by team → feature → category.
+  // Lesson playback and meditation playback are different features — they must never
+  // be merged. Feature tags define the grouping boundary; the AI clusters by meaning
+  // within each feature pool.
   type TicketPool = { tickets: JiraTicket[]; category: 'Bug' | 'Feedback' }
   const pools: TicketPool[] = []
 
   const teams = [...new Set(tickets.map(t => t.teamName ?? ''))]
   for (const team of teams) {
     const teamTickets = tickets.filter(t => (t.teamName ?? '') === team)
-    const bugs = teamTickets.filter(t => t.category === 'Bug')
-    const feedback = teamTickets.filter(t => t.category === 'Feedback')
-    const other = teamTickets.filter(t => t.category !== 'Bug' && t.category !== 'Feedback')
-    if (bugs.length > 0) pools.push({ tickets: bugs, category: 'Bug' })
-    if (feedback.length > 0) pools.push({ tickets: feedback, category: 'Feedback' })
-    if (other.length > 0) pools.push({ tickets: other, category: 'Feedback' })
+    const features = [...new Set(teamTickets.map(t => t.featureName ?? ''))]
+    for (const feature of features) {
+      const ft = teamTickets.filter(t => (t.featureName ?? '') === feature)
+      const bugs = ft.filter(t => t.category === 'Bug')
+      const feedback = ft.filter(t => t.category === 'Feedback')
+      const other = ft.filter(t => t.category !== 'Bug' && t.category !== 'Feedback')
+      if (bugs.length > 0) pools.push({ tickets: bugs, category: 'Bug' })
+      if (feedback.length > 0) pools.push({ tickets: feedback, category: 'Feedback' })
+      if (other.length > 0) pools.push({ tickets: other, category: 'Feedback' })
+    }
   }
 
   const CONCURRENCY = 8
