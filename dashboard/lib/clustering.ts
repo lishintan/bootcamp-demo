@@ -142,51 +142,57 @@ async function callGemini(apiKey: string, prompt: string, maxTokens: number): Pr
   return data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
 }
 
-async function aiClusterPool(
+async function aiClusterGlobal(
   tickets: JiraTicket[],
   category: 'Bug' | 'Feedback',
   apiKey: string,
 ): Promise<number[][]> {
-  if (tickets.length <= 1) return tickets.map((_, i) => [i])
+  if (tickets.length === 0) return []
+  if (tickets.length === 1) return [[0]]
 
   const lines = tickets
     .map((t, i) => {
-      const desc = t.description?.trim().slice(0, 500) ?? ''
-      return `[${i}] ${t.summary}${desc ? ' — ' + desc : ''}`
+      const desc = t.description?.trim().slice(0, 200) ?? ''
+      return `[${i}] ${t.summary}${desc ? `\n    ${desc}` : ''}`
     })
     .join('\n')
 
   try {
     const raw = await callGemini(
       apiKey,
-      `Group these ${tickets.length} ${category === 'Bug' ? 'bug' : 'feedback'} tickets by the core user insight they represent.
+      `You are grouping product ${category === 'Bug' ? 'bug reports' : 'feedback'} for a PM dashboard.
+
+Read each ticket's title AND the description below it. Understand the specific problem each user is experiencing before grouping.
+
+Group tickets that describe the EXACT SAME specific user problem — i.e. different users hitting the same issue or making the same request.
 
 RULES:
-1. Group by the USER'S UNDERLYING FRUSTRATION or NEED — not by the exact wording or specific feature requested.
-   - "streak freeze option", "streak save", "grace period for missed day", "streak forgiveness" → same frustration: losing streaks feels unfair → ONE group
-   - "video won't load", "lesson freezes", "content won't play" → same frustration: playback is broken → ONE group
-2. Different user needs = different groups. "Streak protection" ≠ "offline access" ≠ "quest reset" ≠ "lesson playback".
-3. Merge tickets that express the same frustration even if they propose different solutions.
-4. Keep separate only when the underlying frustration or affected feature is genuinely different.
+1. Read descriptions carefully. Titles alone can be misleading.
+2. Group by the SPECIFIC problem, not the general area:
+   - "Streak resets after one missed day" + "Lost 90-day streak due to system outage" → same problem (streak lost unfairly) → ONE group
+   - "Can't jump to a specific lesson video" + "Can't find which quests are incomplete" → different problems → SEPARATE groups
+   - "App crashes on launch" + "App freezes mid-video" → different failure modes → SEPARATE groups
+3. Do NOT group tickets just because they share a keyword (e.g. "navigation", "loading", "discovery").
+4. Different user goals = different groups, even if they sound related.
 
 ${lines}
 
-Output ONLY a JSON array of arrays of indices. No explanation, no markdown.
-Example: [[0,3],[1,4],[2],[5,6]]`,
-      Math.min(tickets.length * 40 + 1000, 8192),
+Output ONLY a JSON array of arrays of 0-based indices. Every index 0-${tickets.length - 1} must appear exactly once.
+Example: [[0,3],[1],[2,4,5],[6,7],[8]]`,
+      8192,
     )
 
     const text = raw.replace(/```(?:json)?\n?/g, '').replace(/```/g, '').trim()
     const match = text.match(/\[[\s\S]*\]/)
     if (!match) {
-      console.error('[cluster] Could not parse Gemini response — falling back to TF-IDF. Response:', raw.slice(0, 200))
+      console.error('[cluster] Could not parse global response — TF-IDF fallback:', raw.slice(0, 200))
       return tfidfFallback(tickets)
     }
 
     const parsed = JSON.parse(match[0]) as number[][]
     return normaliseClusterResult(parsed, tickets.length)
   } catch (err) {
-    console.error('[cluster] Exception — falling back to TF-IDF:', err)
+    console.error('[cluster] Global cluster exception — TF-IDF fallback:', err)
     return tfidfFallback(tickets)
   }
 }
@@ -340,115 +346,27 @@ async function enrichWithAI(groups: InsightGroup[]): Promise<InsightGroup[]> {
   return results.flat()
 }
 
-// ─── Global second-pass merge ────────────────────────────────────────────────
-// After per-pool clustering, groups from different pools can still represent the
-// same user problem. This pass sends all group titles to Gemini and merges duplicates.
+// ─── Build groups from cluster indices ───────────────────────────────────────
 
-function mergeGroupSet(toMerge: InsightGroup[]): InsightGroup {
-  const sorted = [...toMerge].sort((a, b) => b.frequency - a.frequency)
-  const allTickets = sorted.flatMap(g => g.tickets)
-
-  const featureCount = new Map<string, number>()
-  for (const t of allTickets) featureCount.set(t.featureName ?? '', (featureCount.get(t.featureName ?? '') ?? 0) + 1)
-  const dominantFeature = [...featureCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? ''
-
-  const allImpact = allTickets.map(t => t.impactScore).filter((s): s is number => s !== null)
-  const avgImpact = allImpact.length > 0 ? allImpact.reduce((a, b) => a + b, 0) / allImpact.length : 0
-  const mostRecent = allTickets.reduce((best, t) =>
-    new Date(t.updated ?? t.created) > new Date(best.updated ?? best.created) ? t : best,
-  )
-  const primary = sorted[0]
-
-  return {
-    ...primary,
-    tickets: allTickets,
-    frequency: allTickets.length,
-    featureName: dominantFeature,
-    sources: [...new Set(allTickets.flatMap(t => t.labels))].filter(Boolean),
-    impactScore: Math.round(avgImpact * 100) / 100,
-    recency: mostRecent.updated ?? mostRecent.created,
-    hook: generateHook(allTickets),
-    whyTag: classifyWhyTag(allTickets),
-  }
-}
-
-async function crossPoolMerge(groups: InsightGroup[], apiKey: string): Promise<InsightGroup[]> {
-  if (groups.length <= 1) return groups
-
-  const lines = groups
-    .map((g, i) => `[${i}] ${g.title || g.representativeTicket.summary} (${g.frequency} reports)`)
-    .join('\n')
-
-  try {
-    const raw = await callGemini(
-      apiKey,
-      `These are insight groups from a product feedback dashboard. Some groups represent the SAME user problem but were clustered separately. Identify which groups should be merged.
-
-${lines}
-
-Return a JSON array where each element is a list of indices to merge. Every index 0-${groups.length - 1} must appear exactly once.
-Only merge groups that clearly represent the same user frustration or need.
-Example: [[0,3],[1],[2,4,5],[6]]`,
-      Math.min(groups.length * 15 + 500, 8192),
-    )
-
-    const text = raw.replace(/```(?:json)?\n?/g, '').replace(/```/g, '').trim()
-    const match = text.match(/\[[\s\S]*\]/)
-    if (!match) {
-      console.error('[merge] Could not parse response:', raw.slice(0, 200))
-      return groups
-    }
-
-    const clusters = JSON.parse(match[0]) as number[][]
-    const seen = new Set<number>()
-    const result: InsightGroup[] = []
-
-    for (const cluster of clusters) {
-      const valid = cluster.filter(i => typeof i === 'number' && i >= 0 && i < groups.length && !seen.has(i))
-      if (valid.length === 0) continue
-      valid.forEach(i => seen.add(i))
-      result.push(valid.length === 1 ? groups[valid[0]] : mergeGroupSet(valid.map(i => groups[i])))
-    }
-
-    for (let i = 0; i < groups.length; i++) {
-      if (!seen.has(i)) result.push(groups[i])
-    }
-
-    return result
-  } catch (err) {
-    console.error('[merge] Exception:', err)
-    return groups
-  }
-}
-
-// ─── Pool clustering ──────────────────────────────────────────────────────────
-
-async function clusterPool(
+function buildGroups(
   tickets: JiraTicket[],
+  indices: number[][],
   category: 'Bug' | 'Feedback',
-  apiKey: string,
-): Promise<Omit<InsightGroup, 'temperatureScore' | 'temperature'>[]> {
-  if (tickets.length === 0) return []
+): Omit<InsightGroup, 'temperatureScore' | 'temperature'>[] {
+  return indices.map((idxArr: number[]) => {
+    const groupTickets = idxArr.map((i: number) => tickets[i])
+    const rep = [...groupTickets].sort((a: JiraTicket, b: JiraTicket) => (b.impactScore ?? 0) - (a.impactScore ?? 0))[0]
 
-  const clusterIndices = await aiClusterPool(tickets, category, apiKey)
-
-  return clusterIndices.map(indices => {
-    const groupTickets = indices.map(i => tickets[i])
-
-    // Use highest-impact ticket as representative
-    const rep = [...groupTickets].sort((a, b) => (b.impactScore ?? 0) - (a.impactScore ?? 0))[0]
-
-    // Use the most common featureName so the group reflects the majority, not just one ticket
     const featureCount = new Map<string, number>()
     for (const t of groupTickets) featureCount.set(t.featureName ?? '', (featureCount.get(t.featureName ?? '') ?? 0) + 1)
     const dominantFeature = [...featureCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? ''
 
-    const mostRecent = groupTickets.reduce((best, t) =>
+    const mostRecent = groupTickets.reduce((best: JiraTicket, t: JiraTicket) =>
       new Date(t.updated ?? t.created) > new Date(best.updated ?? best.created) ? t : best,
     )
-    const sources = [...new Set(groupTickets.flatMap(t => t.labels))].filter(Boolean)
-    const impactScores = groupTickets.map(t => t.impactScore).filter((s): s is number => s !== null)
-    const avgImpact = impactScores.length > 0 ? impactScores.reduce((a, b) => a + b, 0) / impactScores.length : 0
+    const sources = [...new Set(groupTickets.flatMap((t: JiraTicket) => t.labels))].filter(Boolean)
+    const impactScores = groupTickets.map((t: JiraTicket) => t.impactScore).filter((s: unknown): s is number => typeof s === 'number')
+    const avgImpact = impactScores.length > 0 ? impactScores.reduce((a: number, b: number) => a + b, 0) / impactScores.length : 0
 
     return {
       id: rep.key,
@@ -483,39 +401,32 @@ export async function clusterTickets(
   if (clusterCache.has(cacheKey)) return clusterCache.get(cacheKey)!
 
   const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) {
-    console.warn('[clustering] No GEMINI_API_KEY — grouping by TF-IDF only')
-    // Fall through: aiClusterPool will use tfidfFallback internally when apiKey is missing
+  if (!apiKey) console.warn('[clustering] No GEMINI_API_KEY — grouping by TF-IDF only')
+
+  // Global clustering per category — all tickets in one AI call so it can compare
+  // every ticket against every other before grouping. No team-based sub-pools.
+  const bugs = tickets.filter(t => t.category === 'Bug')
+  const feedback = tickets.filter(t => t.category === 'Feedback')
+  const other = tickets.filter(t => t.category !== 'Bug' && t.category !== 'Feedback')
+
+  async function clusterCategory(
+    pool: JiraTicket[],
+    cat: 'Bug' | 'Feedback',
+  ): Promise<Omit<InsightGroup, 'temperatureScore' | 'temperature'>[]> {
+    if (pool.length === 0) return []
+    const indices = apiKey
+      ? await aiClusterGlobal(pool, cat, apiKey)
+      : pool.map((_: JiraTicket, i: number) => [i])
+    return buildGroups(pool, indices, cat)
   }
 
-  const teamNames = [...new Set(tickets.map(t => t.teamName ?? ''))]
+  const [bugGroups, feedbackGroups, otherGroups] = await Promise.all([
+    clusterCategory(bugs, 'Bug'),
+    clusterCategory(feedback, 'Feedback'),
+    clusterCategory(other, 'Feedback'),
+  ])
 
-  type PoolFn = () => Promise<Omit<InsightGroup, 'temperatureScore' | 'temperature'>[]>
-  const tasks: PoolFn[] = teamNames.flatMap(team => {
-    // Pool by team + category only — NOT by feature.
-    // Feature tags are inconsistent: "streak broken during meditation" can be tagged as
-    // "Meditations" or "Streaks & Progress" depending on who filed it. Splitting by feature
-    // puts those tickets in separate pools that never see each other and can never be grouped.
-    const teamTickets = tickets.filter(t => (t.teamName ?? '') === team)
-    const bugs = teamTickets.filter(t => t.category === 'Bug')
-    const feedback = teamTickets.filter(t => t.category === 'Feedback')
-    const uncategorised = teamTickets.filter(t => t.category !== 'Bug' && t.category !== 'Feedback')
-    const key = apiKey ?? ''
-    return [
-      () => key ? clusterPool(bugs, 'Bug', key) : Promise.resolve(bugs.map(ticketToSingleton)),
-      () => key ? clusterPool(feedback, 'Feedback', key) : Promise.resolve(feedback.map(ticketToSingleton)),
-      () => key ? clusterPool(uncategorised, 'Feedback', key) : Promise.resolve(uncategorised.map(ticketToSingleton)),
-    ]
-  })
-
-  const CONCURRENCY = 8
-  const poolResults: Omit<InsightGroup, 'temperatureScore' | 'temperature'>[][] = []
-  for (let i = 0; i < tasks.length; i += CONCURRENCY) {
-    const results = await Promise.all(tasks.slice(i, i + CONCURRENCY).map(fn => fn()))
-    poolResults.push(...results)
-  }
-
-  const allGroups = poolResults.flat()
+  const allGroups = [...bugGroups, ...feedbackGroups, ...otherGroups]
   const now = Date.now()
   const temps = computeTemperatures(allGroups.map(g => ({
     frequency: g.frequency,
@@ -531,38 +442,8 @@ export async function clusterTickets(
 
   result.sort((a, b) => b.temperatureScore - a.temperatureScore)
 
-  // Second pass: merge groups across pools that represent the same user problem
-  const merged = apiKey ? await crossPoolMerge(result, apiKey) : result
-
-  // Recompute temperatures after merge (frequencies changed)
-  const mergedTemps = computeTemperatures(merged.map(g => ({
-    frequency: g.frequency,
-    impactScore: g.impactScore,
-    recencyDays: (now - new Date(g.recency).getTime()) / (1000 * 60 * 60 * 24),
-  })))
-  const retemped = merged.map((g, i) => ({ ...g, ...mergedTemps[i] }))
-  retemped.sort((a, b) => b.temperatureScore - a.temperatureScore)
-
-  const finalResult = apiKey ? await enrichWithAI(retemped) : retemped
+  const finalResult = apiKey ? await enrichWithAI(result) : result
   clusterCache.set(cacheKey, finalResult)
   return finalResult
 }
 
-function ticketToSingleton(t: JiraTicket): Omit<InsightGroup, 'temperatureScore' | 'temperature'> {
-  return {
-    id: t.key,
-    representativeTicket: t,
-    tickets: [t],
-    frequency: 1,
-    category: (t.category as 'Bug' | 'Feedback') ?? 'Feedback',
-    teamName: t.teamName ?? '',
-    featureName: t.featureName ?? '',
-    sources: t.labels ?? [],
-    impactScore: t.impactScore ?? 0,
-    recency: t.created,
-    hook: t.summary,
-    title: t.summary,
-    aiSummary: '',
-    whyTag: 'Friction',
-  }
-}
