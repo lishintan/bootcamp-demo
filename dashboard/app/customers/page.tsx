@@ -14,7 +14,7 @@ interface CustomerAttributes {
 
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
-const CACHE_KEY = 'pid-customers-v2'
+const CACHE_KEY = 'pid-customers-v3'
 const CACHE_TTL = 60 * 60 * 6
 const BATCH_SIZE = 20
 const DEFAULTS: CustomerAttributes = {
@@ -48,27 +48,23 @@ async function writeCache(data: CustomerAttributes[]): Promise<void> {
 
 async function enrichBatch(summaries: string[], apiKey: string): Promise<CustomerAttributes[]> {
   const content = summaries.map((s, i) => `[${i + 1}] ${s.slice(0, 300)}`).join('\n\n')
+  const prompt = `Extract attributes from these ${summaries.length} Mindvalley customer profiles.\n\n${content}\n\nReturn a JSON array of exactly ${summaries.length} objects using ONLY these values:\n- age: "20s"|"30s"|"40s"|"50s"|"60s"|"70s+"|"Unknown"\n- lifeStage: "Parent"|"Student"|"Retired"|"Single"|"Entrepreneur"|"Professional"\n- job: "Coach"|"Entrepreneur"|"Educator"|"Healthcare"|"Tech"|"Corporate"|"Creative"|"Other"\n- motivation: "Personal Growth"|"Wellness"|"Learning"|"Spirituality"|"Career"|"Other"\n- techLiteracy: "Low"|"Medium"|"High"\n- device: "Mobile"|"Desktop"|"Tablet"|"Multi-device"\n\nJSON array only: [{"age":"...","lifeStage":"...","job":"...","motivation":"...","techLiteracy":"...","device":"..."}, ...]`
   try {
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: Math.min(80 * summaries.length, 4096) },
+        }),
       },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 80 * summaries.length,
-        messages: [{
-          role: 'user',
-          content: `Extract attributes from these ${summaries.length} Mindvalley customer profiles.\n\n${content}\n\nReturn a JSON array of exactly ${summaries.length} objects using ONLY these values:\n- age: "20s"|"30s"|"40s"|"50s"|"60s"|"70s+"|"Unknown"\n- lifeStage: "Parent"|"Student"|"Retired"|"Single"|"Entrepreneur"|"Professional"\n- job: "Coach"|"Entrepreneur"|"Educator"|"Healthcare"|"Tech"|"Corporate"|"Creative"|"Other"\n- motivation: "Personal Growth"|"Wellness"|"Learning"|"Spirituality"|"Career"|"Other"\n- techLiteracy: "Low"|"Medium"|"High"\n- device: "Mobile"|"Desktop"|"Tablet"|"Multi-device"\n\nJSON array only: [{"age":"...","lifeStage":"...","job":"...","motivation":"...","techLiteracy":"...","device":"..."}, ...]`,
-        }],
-      }),
-    })
+    )
     if (!resp.ok) return summaries.map(() => ({ ...DEFAULTS }))
-    const data = await resp.json() as { content: { type: string; text: string }[] }
-    const text = data.content?.[0]?.text ?? ''
-    const match = text.match(/\[[\s\S]*\]/)
+    const data = await resp.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] }
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+    const match = text.replace(/```(?:json)?\n?/g, '').replace(/```/g, '').match(/\[[\s\S]*\]/)
     const parsed = JSON.parse(match?.[0] ?? '[]') as Partial<CustomerAttributes>[]
     return summaries.map((_, i) => ({
       age: parsed[i]?.age || DEFAULTS.age,
@@ -87,7 +83,7 @@ async function getEnrichedAttributes(summaries: string[]): Promise<CustomerAttri
   const cached = await readCache()
   if (cached && cached.length === summaries.length) return cached
 
-  const apiKey = process.env.ANTHROPIC_API_KEY
+  const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) return summaries.map(() => ({ ...DEFAULTS }))
 
   const batches: string[][] = []
