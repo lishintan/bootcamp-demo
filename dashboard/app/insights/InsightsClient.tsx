@@ -1009,6 +1009,7 @@ type SortBy = 'temperature' | 'frequency'
 
 interface InsightData {
   groups: InsightGroup[]
+  bootstrapping?: boolean
 }
 
 export default function InsightsClient() {
@@ -1016,6 +1017,10 @@ export default function InsightsClient() {
   const [selectedTeams, setSelectedTeams] = useState<string[]>([])
   const [activeTab, setActiveTab] = useState<Tab>('open')
   const [sortBy, setSortBy] = useState<SortBy>('temperature')
+  const [pipelineStatus, setPipelineStatus] = useState<'idle' | 'running' | 'done'>('idle')
+  const [pipelineMessage, setPipelineMessage] = useState<string>('')
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [bootstrapping, setBootstrapping] = useState(false)
 
   // Data for both tabs (loaded in parallel)
   const [openData, setOpenData] = useState<InsightData | null>(null)
@@ -1165,6 +1170,14 @@ export default function InsightsClient() {
         depResp.json(),
       ])
 
+      if (openJson.bootstrapping) {
+        setBootstrapping(true)
+        setOpenData({ groups: [] })
+        setDeprioritizedData({ groups: [] })
+        return
+      }
+      setBootstrapping(false)
+
       // If multiple teams selected, filter client-side
       const filterByTeams = (groups: InsightGroup[]): InsightGroup[] => {
         if (teams.length === 0) return groups
@@ -1205,6 +1218,55 @@ export default function InsightsClient() {
     setSelectedGroup(null)
   }
 
+  const handleRefresh = useCallback(async () => {
+    if (pipelineStatus === 'running') return
+    setPipelineStatus('running')
+    setPipelineMessage('Starting refresh...')
+    try {
+      const resp = await fetch('/api/pipeline/trigger', { method: 'POST' })
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({})) as { error?: string }
+        setPipelineStatus('idle')
+        setPipelineMessage(data.error ?? 'Failed to start refresh')
+        return
+      }
+    } catch {
+      setPipelineStatus('idle')
+      setPipelineMessage('Failed to start refresh')
+      return
+    }
+
+    if (pollRef.current) clearInterval(pollRef.current)
+    pollRef.current = setInterval(async () => {
+      try {
+        const resp = await fetch('/api/pipeline/status')
+        if (!resp.ok) return
+        const data = await resp.json() as { status: string; error?: string }
+        if (data.status === 'completed') {
+          clearInterval(pollRef.current!)
+          pollRef.current = null
+          setPipelineStatus('done')
+          setPipelineMessage('Insights refreshed!')
+          fetchData(selectedTeams)
+          setBootstrapping(false)
+          setTimeout(() => { setPipelineStatus('idle'); setPipelineMessage('') }, 4000)
+        } else if (data.status === 'failed') {
+          clearInterval(pollRef.current!)
+          pollRef.current = null
+          setPipelineStatus('idle')
+          setPipelineMessage(data.error ?? 'Refresh failed')
+        }
+      } catch {
+        // Ignore transient poll errors
+      }
+    }, 10000)
+  }, [pipelineStatus, fetchData, selectedTeams])
+
+  // Cleanup poll interval on unmount
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+  }, [])
+
   // Current tab data
   const currentData = activeTab === 'open' ? openData : deprioritizedData
   const sortFn = sortBy === 'frequency'
@@ -1231,16 +1293,83 @@ export default function InsightsClient() {
               : 'Showing insights across all teams'}
           </p>
         </div>
-        <button
-          onClick={handleChangeFilter}
-          className="text-sm text-indigo-400 hover:text-indigo-300 font-medium transition-colors flex items-center gap-1 px-3 py-1.5 rounded-lg border border-indigo-800 hover:border-indigo-600"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" />
-          </svg>
-          Change Filter
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleRefresh}
+            disabled={pipelineStatus === 'running'}
+            className="text-sm font-medium transition-colors flex items-center gap-1.5 px-3 py-1.5 rounded-lg border disabled:opacity-60 disabled:cursor-not-allowed text-emerald-400 hover:text-emerald-300 border-emerald-800 hover:border-emerald-600"
+          >
+            {pipelineStatus === 'running' ? (
+              <>
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Refreshing…
+              </>
+            ) : pipelineStatus === 'done' ? (
+              <>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                Refreshed!
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Refresh Insights
+              </>
+            )}
+          </button>
+          <button
+            onClick={handleChangeFilter}
+            className="text-sm text-indigo-400 hover:text-indigo-300 font-medium transition-colors flex items-center gap-1 px-3 py-1.5 rounded-lg border border-indigo-800 hover:border-indigo-600"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2a1 1 0 01-.293.707L13 13.414V19a1 1 0 01-.553.894l-4 2A1 1 0 017 21v-7.586L3.293 6.707A1 1 0 013 6V4z" />
+            </svg>
+            Change Filter
+          </button>
+        </div>
       </div>
+
+      {/* Pipeline status message */}
+      {pipelineMessage && (
+        <div className={`rounded-xl px-4 py-3 text-sm flex items-center justify-between gap-3 ${
+          pipelineStatus === 'done'
+            ? 'bg-emerald-900/20 border border-emerald-700 text-emerald-300'
+            : pipelineStatus === 'running'
+            ? 'bg-blue-900/20 border border-blue-700 text-blue-300'
+            : 'bg-amber-900/20 border border-amber-700 text-amber-300'
+        }`}>
+          <span>{pipelineMessage}{pipelineStatus === 'running' && ' Checking every 10s…'}</span>
+          {pipelineStatus === 'idle' && (
+            <button onClick={() => setPipelineMessage('')} className="text-xs underline opacity-70 hover:opacity-100">
+              Dismiss
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Bootstrapping banner — no data yet */}
+      {bootstrapping && !loading && (
+        <div className="bg-gray-800 border border-dashed border-gray-600 rounded-xl p-8 text-center space-y-3">
+          <div className="text-3xl">🌱</div>
+          <p className="text-white font-semibold">No insights yet</p>
+          <p className="text-gray-400 text-sm">
+            The pipeline hasn&apos;t run yet. Click <strong>Refresh Insights</strong> to generate the first batch — this takes about 5 minutes.
+          </p>
+          <button
+            onClick={handleRefresh}
+            disabled={pipelineStatus === 'running'}
+            className="mt-2 px-5 py-2 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
+          >
+            {pipelineStatus === 'running' ? 'Running…' : 'Generate Insights Now'}
+          </button>
+        </div>
+      )}
 
       {/* Bookmark error toast */}
       {bookmarkError && (

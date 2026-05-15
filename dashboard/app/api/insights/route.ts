@@ -1,61 +1,11 @@
-import { fetchJiraTickets } from '@/lib/jira'
-import { clusterTickets } from '@/lib/clustering'
+import { getDb } from '@/lib/db'
+import { ensureSchema } from '@/lib/schema'
 import type { InsightGroup } from '@/lib/clustering'
+import type { JiraTicket } from '@/lib/jira'
 import type { NextRequest } from 'next/server'
 
 export const dynamic = 'force-dynamic'
-export const maxDuration = 300
-
-const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL
-const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN
-const CLUSTER_CACHE_KEY = 'pid-clusters-v43'
-const CLUSTER_CACHE_TTL = 86400 // 24 hours
-
-interface CachedPayload {
-  groups: InsightGroup[]
-  total: number
-  parkingLot: number
-  wontDo: number
-}
-
-async function readClusterCache(): Promise<CachedPayload | null> {
-  if (!REDIS_URL || !REDIS_TOKEN) return null
-  try {
-    const res = await fetch(`${REDIS_URL}/get/${CLUSTER_CACHE_KEY}`, {
-      headers: { Authorization: `Bearer ${REDIS_TOKEN}` },
-      cache: 'no-store',
-    })
-    const json = await res.json() as { result: string | null }
-    if (!json.result) return null
-    return JSON.parse(json.result) as CachedPayload
-  } catch {
-    return null
-  }
-}
-
-async function writeClusterCache(data: CachedPayload): Promise<void> {
-  if (!REDIS_URL || !REDIS_TOKEN) return
-  try {
-    await fetch(`${REDIS_URL}/pipeline`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${REDIS_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify([['SET', CLUSTER_CACHE_KEY, JSON.stringify(data), 'EX', CLUSTER_CACHE_TTL]]),
-    })
-  } catch {
-    // non-fatal
-  }
-}
-
-function slimForCache(groups: InsightGroup[]): InsightGroup[] {
-  return groups.map(g => ({
-    ...g,
-    representativeTicket: { ...g.representativeTicket, description: null },
-    tickets: g.tickets.map(t => ({ ...t, description: null })),
-  }))
-}
+export const maxDuration = 30
 
 function applyFilters(
   groups: InsightGroup[],
@@ -66,18 +16,12 @@ function applyFilters(
   let result = groups
   if (statusFilter === 'parking_lot') {
     result = result
-      .map(g => ({
-        ...g,
-        tickets: g.tickets.filter(t => t.status.toLowerCase() === 'parking lot'),
-      }))
+      .map(g => ({ ...g, tickets: g.tickets.filter(t => t.status.toLowerCase() === 'parking lot') }))
       .filter(g => g.tickets.length > 0)
       .map(g => ({ ...g, frequency: g.tickets.length }))
   } else if (statusFilter === 'wont_do') {
     result = result
-      .map(g => ({
-        ...g,
-        tickets: g.tickets.filter(t => t.status.toLowerCase() === "won't do"),
-      }))
+      .map(g => ({ ...g, tickets: g.tickets.filter(t => t.status.toLowerCase() === "won't do") }))
       .filter(g => g.tickets.length > 0)
       .map(g => ({ ...g, frequency: g.tickets.length }))
   }
@@ -87,9 +31,111 @@ function applyFilters(
   if (categoryFilter === 'Bug' || categoryFilter === 'Feedback') {
     result = result.filter(g => g.category === categoryFilter)
   }
-  // Only surface groups with 2+ reports — single-report cards are noise at dashboard level
   result = result.filter(g => g.frequency >= 2)
   return result
+}
+
+// ─── DB row types ─────────────────────────────────────────────────────────────
+
+interface TicketRow {
+  key: string
+  runId: string
+  jiraId: string | null
+  summary: string | null
+  description: string | null
+  status: string | null
+  labels: string[]
+  created: Date | null
+  updated: Date | null
+  priority: string | null
+  impactScore: number | null
+  teamName: string | null
+  featureName: string | null
+  category: string | null
+  customerSegment: string[] | null
+  platform: string | null
+  featureTitle: string | null
+  archived: boolean
+}
+
+interface GroupRow {
+  id: string
+  runId: string
+  title: string | null
+  aiSummary: string | null
+  hook: string | null
+  category: string
+  teamName: string | null
+  featureName: string | null
+  frequency: number
+  impactScore: number | null
+  recency: Date | null
+  temperature: string
+  temperatureScore: number
+  whyTag: string
+  sources: string[]
+  ticketKeys: string[]
+  representativeTicketKey: string | null
+}
+
+function rowToJiraTicket(row: TicketRow): JiraTicket {
+  const toIso = (d: Date | string | null) =>
+    d ? (d instanceof Date ? d.toISOString() : d) : new Date().toISOString()
+  return {
+    id: row.jiraId ?? row.key,
+    key: row.key,
+    summary: row.summary ?? '',
+    description: row.description,
+    status: row.status ?? '',
+    labels: row.labels ?? [],
+    created: toIso(row.created),
+    updated: toIso(row.updated),
+    priority: row.priority,
+    impactScore: row.impactScore,
+    teamName: row.teamName,
+    featureName: row.featureName,
+    category: row.category,
+    customerSegment: row.customerSegment,
+    platform: row.platform,
+    featureTitle: row.featureTitle,
+    archived: row.archived ?? false,
+  }
+}
+
+function rowToInsightGroup(group: GroupRow, ticketMap: Map<string, JiraTicket>): InsightGroup {
+  const tickets = (group.ticketKeys ?? [])
+    .map(k => ticketMap.get(k))
+    .filter((t): t is JiraTicket => t != null)
+
+  const repTicket =
+    (group.representativeTicketKey ? ticketMap.get(group.representativeTicketKey) : null) ??
+    tickets[0] ??
+    ({ key: group.id, summary: group.title ?? '', description: null, status: '', labels: [],
+       created: '', updated: '', priority: null, impactScore: null, teamName: group.teamName,
+       featureName: group.featureName, category: group.category, customerSegment: null,
+       platform: null, featureTitle: null, archived: false, id: group.id } as JiraTicket)
+
+  const toIso = (d: Date | string | null) =>
+    d ? (d instanceof Date ? d.toISOString() : d) : new Date().toISOString()
+
+  return {
+    id: group.id,
+    representativeTicket: repTicket,
+    tickets,
+    frequency: group.frequency,
+    category: group.category as 'Bug' | 'Feedback',
+    teamName: group.teamName ?? '',
+    featureName: group.featureName ?? '',
+    sources: group.sources ?? [],
+    impactScore: group.impactScore ?? 0,
+    recency: toIso(group.recency),
+    temperature: group.temperature as 'Hot' | 'Medium' | 'Cold',
+    temperatureScore: group.temperatureScore,
+    hook: group.hook ?? '',
+    title: group.title ?? '',
+    aiSummary: group.aiSummary ?? '',
+    whyTag: group.whyTag as 'Friction' | 'Wishlist' | 'Retention' | 'Revenue',
+  }
 }
 
 export async function GET(req: NextRequest) {
@@ -99,35 +145,46 @@ export async function GET(req: NextRequest) {
     const categoryFilter = searchParams.get('category')
     const teamFilter = searchParams.get('team')
 
-    // Check cache BEFORE fetching Jira tickets — cache hit skips all slow work
-    const cached = await readClusterCache()
-    if (cached) {
-      const groups = applyFilters(cached.groups, statusFilter, teamFilter, categoryFilter)
-      return Response.json({ groups, total: cached.total, parkingLot: cached.parkingLot, wontDo: cached.wontDo })
+    await ensureSchema()
+    const sql = getDb()
+
+    // Find the latest completed run
+    const [latestRun] = await sql<{ id: string; ticketCount: number }[]>`
+      SELECT id, ticket_count
+      FROM pipeline_runs
+      WHERE status = 'completed'
+      ORDER BY completed_at DESC
+      LIMIT 1
+    `
+
+    if (!latestRun) {
+      return Response.json({
+        groups: [],
+        total: 0,
+        parkingLot: 0,
+        wontDo: 0,
+        bootstrapping: true,
+      })
     }
 
-    // Cache miss — fetch tickets and cluster
-    const { tickets, total } = await fetchJiraTickets()
-    const parkingLot = tickets.filter(t => t.status.toLowerCase() === 'parking lot').length
-    const wontDo = tickets.filter(t => t.status.toLowerCase() === "won't do").length
+    const runId = latestRun.id
 
-    const aiProvider = process.env.GEMINI_API_KEY ? 'gemini' : 'none'
-    const clustered = await clusterTickets(tickets, aiProvider)
+    // Fetch all tickets and groups for this run in parallel
+    const [ticketRows, groupRows] = await Promise.all([
+      sql<TicketRow[]>`SELECT * FROM jira_tickets WHERE run_id = ${runId}`,
+      sql<GroupRow[]>`SELECT * FROM insight_groups WHERE run_id = ${runId}`,
+    ])
 
-    // Remove groups where every ticket hasn't been updated in 18 months (stale/archived)
-    const cutoff = new Date()
-    cutoff.setMonth(cutoff.getMonth() - 18)
-    const allGroups = clustered.filter(g => {
-      const latestUpdate = g.tickets.reduce((best, t) => {
-        const d = new Date(t.updated || t.created)
-        return d > best ? d : best
-      }, new Date(0))
-      return latestUpdate >= cutoff
-    })
+    const ticketMap = new Map(ticketRows.map(r => [r.key, rowToJiraTicket(r)]))
 
-    await writeClusterCache({ groups: slimForCache(allGroups), total, parkingLot, wontDo })
+    const allGroups: InsightGroup[] = groupRows.map(g => rowToInsightGroup(g, ticketMap))
+
+    const total = latestRun.ticketCount ?? ticketRows.length
+    const parkingLot = ticketRows.filter(t => t.status?.toLowerCase() === 'parking lot').length
+    const wontDo = ticketRows.filter(t => t.status?.toLowerCase() === "won't do").length
 
     const groups = applyFilters(allGroups, statusFilter, teamFilter, categoryFilter)
+
     return Response.json({ groups, total, parkingLot, wontDo })
   } catch (error) {
     console.error('[API /api/insights] Error:', error)
