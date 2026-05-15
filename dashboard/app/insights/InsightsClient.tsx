@@ -1005,6 +1005,7 @@ function LoadingSkeleton() {
 // ─── Main client component ────────────────────────────────────────────────────
 
 type Tab = 'open' | 'deprioritized'
+type SortBy = 'temperature' | 'frequency'
 
 interface InsightData {
   groups: InsightGroup[]
@@ -1014,6 +1015,7 @@ export default function InsightsClient() {
   const [phase, setPhase] = useState<'filter' | 'view'>('filter')
   const [selectedTeams, setSelectedTeams] = useState<string[]>([])
   const [activeTab, setActiveTab] = useState<Tab>('open')
+  const [sortBy, setSortBy] = useState<SortBy>('temperature')
 
   // Data for both tabs (loaded in parallel)
   const [openData, setOpenData] = useState<InsightData | null>(null)
@@ -1205,12 +1207,11 @@ export default function InsightsClient() {
 
   // Current tab data
   const currentData = activeTab === 'open' ? openData : deprioritizedData
-  const bugGroups = (currentData?.groups ?? [])
-    .filter(g => g.category === 'Bug')
-    .sort((a, b) => b.temperatureScore - a.temperatureScore)
-  const feedbackGroups = (currentData?.groups ?? [])
-    .filter(g => g.category === 'Feedback')
-    .sort((a, b) => b.temperatureScore - a.temperatureScore)
+  const sortFn = sortBy === 'frequency'
+    ? (a: InsightGroup, b: InsightGroup) => b.frequency - a.frequency
+    : (a: InsightGroup, b: InsightGroup) => b.temperatureScore - a.temperatureScore
+  const bugGroups = (currentData?.groups ?? []).filter(g => g.category === 'Bug').sort(sortFn)
+  const feedbackGroups = (currentData?.groups ?? []).filter(g => g.category === 'Feedback').sort(sortFn)
 
   // ── Filter screen
   if (phase === 'filter') {
@@ -1254,7 +1255,8 @@ export default function InsightsClient() {
         </div>
       )}
 
-      {/* Tabs */}
+      {/* Tabs + Sort */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
       <div className="flex gap-1 bg-gray-900 rounded-lg p-1 w-fit">
         <button
           onClick={() => setActiveTab('open')}
@@ -1288,6 +1290,30 @@ export default function InsightsClient() {
             </span>
           )}
         </button>
+      </div>
+
+      {/* Sort control */}
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-gray-500 font-medium">Sort by</span>
+        <div className="flex items-center bg-gray-900 rounded-lg border border-gray-700 p-0.5">
+          <button
+            onClick={() => setSortBy('temperature')}
+            className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+              sortBy === 'temperature' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            🔥 Temperature
+          </button>
+          <button
+            onClick={() => setSortBy('frequency')}
+            className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+              sortBy === 'frequency' ? 'bg-indigo-600 text-white' : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            # Most Reports
+          </button>
+        </div>
+      </div>
       </div>
 
       {/* Error state */}

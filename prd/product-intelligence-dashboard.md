@@ -4,7 +4,8 @@ slug: 'product-intelligence-dashboard'
 scope: product
 status: resolved
 parent: null
-children: []
+children:
+  - product-intelligence-dashboard/insights-database-persistence.md
 created: 2026-04-18
 updated: 2026-04-18
 resolution: 8/8
