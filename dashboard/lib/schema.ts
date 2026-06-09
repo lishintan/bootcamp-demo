@@ -1,9 +1,13 @@
 import { getDb } from './db'
 
-let initialised = false
+let initPromise: Promise<void> | null = null
 
-export async function ensureSchema() {
-  if (initialised) return
+export function ensureSchema(): Promise<void> {
+  if (!initPromise) initPromise = _init()
+  return initPromise
+}
+
+async function _init() {
   const sql = getDb()
 
   await sql`
@@ -74,5 +78,4 @@ export async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS insight_groups_run_id_idx ON insight_groups(run_id)
   `
 
-  initialised = true
 }
