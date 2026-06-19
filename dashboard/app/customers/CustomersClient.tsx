@@ -8,125 +8,140 @@ interface Persona {
   id: string
   emoji: string
   name: string
-  age: number
-  occupation: string
+  ageRange: string
+  roles: string
   lifeStage: string
   device: string
   aiSavviness: AiSavviness
+  aiNote: string
   motivation: string
   segment: string
   segmentTone: 'indigo' | 'amber' | 'emerald' | 'rose' | 'sky' | 'violet'
+  prevalence: string
   quote: string
   story: string
   traits: string[]
 }
 
 // ─── Persona archetypes ─────────────────────────────────────────────────────────
-// Curated from the real customer-research segments: Weekly Active, EVE AI power
-// users, Free/Referral, Refunded/Churned, Premium Programs.
+// Each card describes a CLUSTER of customers — generalized ranges and tendencies,
+// not a single individual. Distilled from the real research segments: Weekly
+// Active, EVE AI power users, Free/Referral, Refunded/Churned, Premium Programs.
 
 const PERSONAS: Persona[] = [
   {
-    id: 'seeker',
+    id: 'seekers',
     emoji: '🧘',
-    name: 'Serene the Seeker',
-    age: 52,
-    occupation: 'Retired teacher',
-    lifeStage: 'Retired',
-    device: 'Mobile-first',
+    name: 'The Seekers',
+    ageRange: '45–65',
+    roles: 'Retirees, teachers, nurses, caregivers',
+    lifeStage: 'Empty-nesters & retirees',
+    device: 'Primarily mobile',
     aiSavviness: 'Low',
-    motivation: 'Spirituality',
+    aiNote: 'Mostly low — wary of new tools',
+    motivation: 'Spirituality & wellbeing',
     segment: 'Weekly Active',
     segmentTone: 'indigo',
+    prevalence: 'Large, highly loyal',
     quote: 'I open the app each morning for a meditation before the house wakes up — it’s become my ritual.',
     story:
-      'Came to Mindvalley for inner peace after retiring. Sticks to a small handful of familiar Quests and rarely explores the catalogue. Anything that feels “technical” makes her hesitate, so she leans on the home screen and push reminders to find her way back.',
+      'A large, devoted core who come to Mindvalley for inner peace and calm. They tend to stick to a handful of familiar Quests rather than explore the catalogue, and anything that feels “technical” gives them pause. Most rely on the home screen and push reminders to find their way back.',
     traits: ['Routine-driven', 'Loyal', 'Needs gentle guidance'],
   },
   {
-    id: 'maker',
+    id: 'makers',
     emoji: '🚀',
-    name: 'Marcus the Maker',
-    age: 34,
-    occupation: 'Startup founder',
-    lifeStage: 'Entrepreneur',
+    name: 'The Makers',
+    ageRange: '28–42',
+    roles: 'Founders, freelancers, ambitious professionals',
+    lifeStage: 'Career-building & entrepreneurial',
     device: 'Multi-device',
     aiSavviness: 'High',
-    motivation: 'Personal Growth',
+    aiNote: 'Very high — power users of EVE',
+    motivation: 'Personal growth & performance',
     segment: 'EVE AI Power User',
     segmentTone: 'violet',
+    prevalence: 'Small but fast-growing',
     quote: 'I treat EVE like a coach on demand — I’ll ask it three things before my first coffee.',
     story:
-      'An early adopter who lives across phone, laptop and tablet. Pushes every AI feature to its limit and gives blunt feedback when it falls short. High expectations: if a workflow has friction, he’ll find a workaround or churn to a competitor.',
-    traits: ['Power user', 'High expectations', 'Vocal feedback'],
+      'Early adopters who live across phone, laptop and tablet and push every AI feature to its limit. They set a high bar and give blunt feedback when it isn’t met. Where a workflow has friction, they’ll find a workaround — or churn to a competitor that removes it.',
+    traits: ['Power users', 'High expectations', 'Vocal feedback'],
   },
   {
-    id: 'parent',
-    emoji: '👩‍👧',
-    name: 'Priya the Parent',
-    age: 41,
-    occupation: 'Marketing manager',
-    lifeStage: 'Parent',
-    device: 'Mobile',
+    id: 'parents',
+    emoji: '👨‍👩‍👧',
+    name: 'The Busy Parents',
+    ageRange: '35–48',
+    roles: 'Managers, professionals juggling family',
+    lifeStage: 'Raising children',
+    device: 'Mostly mobile, on the go',
     aiSavviness: 'Medium',
-    motivation: 'Wellness',
+    aiNote: 'Comfortable but pragmatic',
+    motivation: 'Wellness & balance',
     segment: 'Weekly Active',
     segmentTone: 'emerald',
+    prevalence: 'Large core segment',
     quote: 'I get maybe 15 minutes between work and the kids — it has to be quick and worth it.',
     story:
-      'Time-starved and goal-oriented. Squeezes short sessions into school runs and lunch breaks, almost always on her phone. Values bite-sized content and clear progress; abandons anything that demands a long uninterrupted block of attention.',
+      'Time-starved and goal-oriented. They squeeze short sessions into school runs and lunch breaks, almost always on their phones. They value bite-sized content and visible progress, and tend to abandon anything that demands a long, uninterrupted block of attention.',
     traits: ['Time-poor', 'Goal-oriented', 'Bite-sized sessions'],
   },
   {
-    id: 'explorer',
+    id: 'explorers',
     emoji: '🎨',
-    name: 'Elena the Explorer',
-    age: 26,
-    occupation: 'Freelance designer',
-    lifeStage: 'Single',
-    device: 'Mobile',
+    name: 'The Explorers',
+    ageRange: '22–32',
+    roles: 'Students, creatives, early-career',
+    lifeStage: 'Young & single',
+    device: 'Mobile-native',
     aiSavviness: 'High',
-    motivation: 'Learning',
+    aiNote: 'Digitally fluent, AI-curious',
+    motivation: 'Learning & discovery',
     segment: 'Free / Referral',
     segmentTone: 'sky',
+    prevalence: 'High-volume top-of-funnel',
     quote: 'A friend sent me a link — I’m sampling everything before I decide it’s worth paying for.',
     story:
-      'Joined free through a referral and is browsing widely across topics. Digitally fluent and price-sensitive — she’ll happily try AI features but won’t convert until the value is obvious. The classic “almost a member” who needs one standout moment to commit.',
-    traits: ['Curious', 'Price-sensitive', 'Conversion candidate'],
+      'Mostly arrive free, through referrals, and browse widely across topics. Digitally fluent and price-sensitive, they’ll happily try AI features but won’t convert until the value is obvious. The classic “almost members” — each needs one standout moment to commit.',
+    traits: ['Curious', 'Price-sensitive', 'Conversion candidates'],
   },
   {
-    id: 'drifter',
+    id: 'drifters',
     emoji: '🌊',
-    name: 'Daniel the Drifter',
-    age: 29,
-    occupation: 'Software engineer',
-    lifeStage: 'Professional',
-    device: 'Desktop',
-    aiSavviness: 'High',
-    motivation: 'Career',
+    name: 'The Drifters',
+    ageRange: '25–40',
+    roles: 'Professionals across many fields',
+    lifeStage: 'Mixed — busy working life',
+    device: 'Split mobile & desktop',
+    aiSavviness: 'Medium',
+    aiNote: 'Capable, but never hooked',
+    motivation: 'Self-improvement (stalled)',
     segment: 'Refunded / Churned',
     segmentTone: 'rose',
+    prevalence: 'At-risk / win-back',
     quote: 'I signed up with big plans, then life got busy and I just… stopped opening it.',
     story:
-      'Started strong but lost momentum within weeks and ultimately refunded. Tech-savvy but never built a habit — no anchor in his day to pull him back. Represents the activation gap: high intent at signup, no sustained engagement, winnable with the right nudge.',
+      'Started strong but lost momentum within weeks, and many ultimately refunded. They never built a habit — no anchor in the day to pull them back. They represent the activation gap: high intent at signup, little sustained engagement, and winnable with the right nudge.',
     traits: ['Lapsed', 'Lost the habit', 'Win-back target'],
   },
   {
-    id: 'reflective',
+    id: 'devotees',
     emoji: '🌿',
-    name: 'Robert the Reflective',
-    age: 67,
-    occupation: 'Retired executive',
-    lifeStage: 'Retired',
-    device: 'Tablet',
+    name: 'The Devotees',
+    ageRange: '50–70',
+    roles: 'Executives, established professionals, retirees',
+    lifeStage: 'Settled & investing in themselves',
+    device: 'Often tablet & desktop',
     aiSavviness: 'Low',
-    motivation: 'Spirituality',
+    aiNote: 'Cautious — wants curriculum, not experiments',
+    motivation: 'Mastery & deep growth',
     segment: 'Premium Programs',
     segmentTone: 'amber',
+    prevalence: 'Small, high-value',
     quote: 'I prefer the bigger screen and a structured programme I can follow start to finish.',
     story:
-      'A committed Premium learner who invests in deep, structured Masterclasses and Certifications. Reads on his tablet, takes notes, and follows a programme to completion. Cautious with new AI tools — he wants a clear curriculum and reassurance, not experimentation.',
-    traits: ['High-value', 'Structured learner', 'Tech-cautious'],
+      'Committed Premium learners who invest in deep, structured Masterclasses and Certifications. They favour larger screens, take notes and follow programmes to completion. They’re cautious with new AI tools, wanting a clear curriculum and reassurance over experimentation.',
+    traits: ['High-value', 'Structured learners', 'Tech-cautious'],
   },
 ]
 
@@ -146,7 +161,7 @@ const TONES: Record<Persona['segmentTone'], { avatar: string; chip: string; quot
 function AiMeter({ level }: { level: AiSavviness }) {
   const filled = level === 'Low' ? 1 : level === 'Medium' ? 2 : 3
   return (
-    <span className="inline-flex items-center gap-1" aria-label={`AI savviness: ${level}`}>
+    <span className="inline-flex items-center gap-1" aria-label={`Typical AI savviness: ${level}`}>
       {[0, 1, 2].map(i => (
         <span
           key={i}
@@ -161,12 +176,12 @@ function AiMeter({ level }: { level: AiSavviness }) {
 
 function AttrRow({ icon, label, children }: { icon: string; label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between text-xs">
-      <span className="text-gray-500 flex items-center gap-1.5">
+    <div className="flex items-start justify-between text-xs gap-3">
+      <span className="text-gray-500 flex items-center gap-1.5 shrink-0">
         <span aria-hidden>{icon}</span>
         {label}
       </span>
-      <span className="text-gray-200 font-medium flex items-center gap-1.5">{children}</span>
+      <span className="text-gray-200 font-medium flex items-center gap-1.5 text-right">{children}</span>
     </div>
   )
 }
@@ -184,26 +199,31 @@ function PersonaCard({ p }: { p: Persona }) {
         </div>
         <div className="min-w-0">
           <h3 className="text-base font-semibold text-white leading-tight">{p.name}</h3>
-          <p className="text-xs text-gray-400 mt-0.5">{p.age} · {p.occupation}</p>
+          <p className="text-xs text-gray-400 mt-0.5">{p.prevalence} segment</p>
         </div>
       </div>
 
-      {/* Quote */}
-      <blockquote className={`border-l-2 ${tone.quoteBar} pl-3 text-sm text-gray-300 italic leading-snug`}>
-        “{p.quote}”
-      </blockquote>
+      {/* Representative quote */}
+      <div>
+        <p className="text-[10px] uppercase tracking-wide text-gray-600 mb-1">Representative voice</p>
+        <blockquote className={`border-l-2 ${tone.quoteBar} pl-3 text-sm text-gray-300 italic leading-snug`}>
+          “{p.quote}”
+        </blockquote>
+      </div>
 
-      {/* Story */}
+      {/* Group description */}
       <p className="text-xs text-gray-400 leading-relaxed">{p.story}</p>
 
-      {/* Attributes */}
+      {/* Generalized attributes */}
       <div className="space-y-2 border-t border-gray-700/70 pt-3">
-        <AttrRow icon="📱" label="Device">{p.device}</AttrRow>
+        <AttrRow icon="🎂" label="Age range">{p.ageRange}</AttrRow>
+        <AttrRow icon="💼" label="Common roles">{p.roles}</AttrRow>
+        <AttrRow icon="🧭" label="Life stage">{p.lifeStage}</AttrRow>
+        <AttrRow icon="📱" label="Devices">{p.device}</AttrRow>
         <AttrRow icon="🤖" label="AI savviness">
           <AiMeter level={p.aiSavviness} />
-          <span className="text-gray-300">{p.aiSavviness}</span>
+          <span className="text-gray-300">{p.aiNote}</span>
         </AttrRow>
-        <AttrRow icon="🧭" label="Life stage">{p.lifeStage}</AttrRow>
         <AttrRow icon="✨" label="Motivation">{p.motivation}</AttrRow>
       </div>
 
@@ -231,8 +251,8 @@ export default function CustomersClient({ totalCustomers }: { totalCustomers: nu
       <div>
         <h1 className="text-2xl font-bold text-white mb-1">Who Are Our Customers</h1>
         <p className="text-gray-400 text-sm">
-          Six archetypes that capture how different Mindvalley users show up — their devices, AI comfort,
-          life stage and what drives them.
+          Six customer segments — each card generalizes a cluster of users, not one person:
+          their typical age range, roles, devices, AI comfort and what drives them.
         </p>
       </div>
 
@@ -240,7 +260,7 @@ export default function CustomersClient({ totalCustomers }: { totalCustomers: nu
       <div className="bg-gray-800 border border-gray-700 rounded-xl px-5 py-3 flex items-center gap-2">
         <span className="inline-block w-2 h-2 rounded-full bg-indigo-400" />
         <span className="text-sm text-gray-300">
-          <span className="font-semibold text-white">{PERSONAS.length}</span> persona archetypes
+          <span className="font-semibold text-white">{PERSONAS.length}</span> customer segments
           {totalCustomers > 0 && (
             <> · distilled from <span className="font-semibold text-white">{totalCustomers}</span> customer interviews</>
           )}
