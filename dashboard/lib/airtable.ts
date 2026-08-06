@@ -64,13 +64,13 @@ export async function fetchProductUsers(): Promise<AirtableUser[]> {
 
       if (!resp.ok) {
         const errorData = await resp.json().catch(() => ({ error: resp.statusText }))
-        // If permissions error, fall through to static data
-        if (resp.status === 403 || resp.status === 404 ||
-            errorData?.error?.type === 'INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND') {
-          console.log('[Airtable] Live API unavailable (permissions), using static user data')
-          return getStaticUsers()
-        }
-        throw new Error(`Airtable API error ${resp.status}: ${JSON.stringify(errorData)}`)
+        // Degrade gracefully to static user data on ANY non-OK response
+        // (401 bad/expired token, 403 no access, 404 wrong id, 429/5xx transient).
+        console.log(
+          `[Airtable] Live user API unavailable (HTTP ${resp.status}` +
+            `${errorData?.error?.type ? `, ${errorData.error.type}` : ''}) — using static user data`
+        )
+        return getStaticUsers()
       }
 
       const data: AirtableListResponse = await resp.json()
@@ -137,14 +137,15 @@ export async function fetchCustomerResearch(): Promise<{ records: AirtableCustom
 
       if (!resp.ok) {
         const errorData = await resp.json().catch(() => ({}))
-        if (resp.status === 403 || resp.status === 404 ||
-            (errorData?.error?.type === 'INVALID_PERMISSIONS_OR_MODEL_NOT_FOUND')) {
-          console.log('[Airtable] Customer research table access restricted — using static fallback')
-          return getStaticCustomerSessions()
-        }
-        console.error(`Airtable customer research API error ${resp.status}`)
-        source = 'error'
-        break
+        // Degrade gracefully to the static snapshot on ANY non-OK response so
+        // the page always renders instead of showing zero customers:
+        //   401 → bad/expired token, 403 → token lacks base access,
+        //   404 → wrong base/table/view id, 429/5xx → transient upstream error.
+        console.log(
+          `[Airtable] Customer research unavailable (HTTP ${resp.status}` +
+            `${errorData?.error?.type ? `, ${errorData.error.type}` : ''}) — using static fallback`
+        )
+        return getStaticCustomerSessions()
       }
 
       const data: AirtableListResponse = await resp.json()

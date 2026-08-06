@@ -1,12 +1,7 @@
 export const dynamic = 'force-dynamic'
 
-import staticCustomerSessions from '@/data/customer-sessions.json'
+import { fetchCustomerResearch } from '@/lib/airtable'
 import CustomersClient from './CustomersClient'
-
-interface CustomerRecord {
-  segment: string
-  summary: string
-}
 
 /**
  * Assigns each interviewed customer to exactly one archetype. Deterministic and
@@ -25,12 +20,38 @@ function classifyArchetype(segment: string, summary: string): string {
   return 'seekers'
 }
 
-export default function CustomersPage() {
-  const records = staticCustomerSessions as CustomerRecord[]
+/**
+ * Records reach us in one of two shapes and we must handle both:
+ *   • Live Airtable  → { id, fields: { Segment, Summary, ... } }
+ *   • Static snapshot → { id, segment, summary, ... }  (data/customer-sessions.json)
+ * We pull `segment`/`summary` out of whichever shape we're given, matching field
+ * names case-insensitively (exact match preferred) so live column labels like
+ * "Segment"/"Summary" work without hardcoding their exact casing.
+ */
+function extractSegmentSummary(record: unknown): { segment: string; summary: string } {
+  const r = (record ?? {}) as Record<string, unknown>
+  const fields = (r.fields && typeof r.fields === 'object' ? r.fields : r) as Record<string, unknown>
+
+  const pick = (key: string): string => {
+    // top-level (snapshot) value wins if present
+    if (typeof r[key] === 'string') return r[key] as string
+    const entries = Object.entries(fields)
+    const exact = entries.find(([k, v]) => typeof v === 'string' && k.toLowerCase() === key)
+    if (exact) return exact[1] as string
+    const partial = entries.find(([k, v]) => typeof v === 'string' && k.toLowerCase().includes(key))
+    return partial ? (partial[1] as string) : ''
+  }
+
+  return { segment: pick('segment'), summary: pick('summary') }
+}
+
+export default async function CustomersPage() {
+  const { records } = await fetchCustomerResearch()
 
   const counts: Record<string, number> = {}
-  for (const r of records) {
-    const id = classifyArchetype(r.segment, r.summary)
+  for (const record of records) {
+    const { segment, summary } = extractSegmentSummary(record)
+    const id = classifyArchetype(segment, summary)
     counts[id] = (counts[id] || 0) + 1
   }
 
